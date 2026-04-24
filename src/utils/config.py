@@ -5,6 +5,7 @@ import yaml
 
 
 def load_yaml_config(path: Optional[str | Path]) -> Dict[str, Any]:
+    print(f"[config] Loading YAML config from {path}", flush=True)
     if path is None:
         return {}
 

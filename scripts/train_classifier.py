@@ -17,6 +17,7 @@ from src.utils.distributed import get_rank, get_world_size, is_distributed, is_m
 
 
 def main():
+    print("[train_classifier] Starting trainer setup", flush=True)
     parser = argparse.ArgumentParser(description="Train the router classifier")
     parser.add_argument("--config", default="configs/train.yaml", help="Path to training config")
     parser.add_argument("--train-data", default=None, help="Path to labeled training data")
@@ -58,6 +59,7 @@ def main():
     if train_data is None:
         raise ValueError("A train-data path must be provided via --train-data or the config file")
 
+    print(f"[train_classifier] Loading data from {train_data}", flush=True)
     datamodule = RouterDataModule(
         train_data=train_data,
         val_data=args.val_data,
@@ -79,7 +81,9 @@ def main():
         num_nodes=num_nodes,
         precision=precision,
     )
+    print("[train_classifier] Starting training", flush=True)
     trainer.fit(model, datamodule=datamodule)
+    print("[train_classifier] Training complete", flush=True)
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ Adaptive RAG dynamically routes question answering requests between three strate
 
 The repository is organized around a simple end-to-end flow:
 
-- build a FAISS retrieval index from a corpus
+- build a Qdrant-backed retrieval index from a corpus
 - generate weak labels by comparing the three strategies against ground-truth answers
 - train a router classifier on the labeled questions
 - run the router at inference time to choose the best answering strategy
@@ -42,8 +42,8 @@ This codebase implements the main Adaptive-RAG pipeline described above:
   - multi-step retrieval
 2. Weak-label generation by running all strategies and scoring outputs against references.
 3. A router/classifier trained on those labels to predict strategy choice.
-4. Retrieval with sentence-transformers + FAISS.
-5. Single-GPU and multi-GPU execution paths (DDP/torchrun) for training and RAG pipeline runs.
+4. Retrieval with sentence-transformers + Qdrant.
+5. Single-process and python-launched multi-process dataset sharding for RAG pipeline runs (`--num-procs`, no `torchrun` required).
 
 In short, the repository operationalizes the paper’s adaptive routing concept end-to-end: generate labels -> train complexity router -> route each query to the most suitable RAG strategy.
 
@@ -98,14 +98,15 @@ This section describes what each script does and where it fits in the workflow.
 - Run when: First step, or whenever you want to refresh local dataset files.
 
 2. `scripts/build_index.py`
-- Purpose: Builds a FAISS retrieval index from your corpus.
-- Main outputs: `index.faiss` and `documents.json` in the configured output directory.
+- Purpose: Builds a Qdrant retrieval collection from your corpus and saves index metadata.
+- Main outputs: `documents.json` in the configured output directory and local Qdrant storage under `.qdrant_db`.
 - Run when: After preparing corpus data; rerun only if corpus or embedding model changes.
 
 3. `scripts/run_rag_pipelines.py`
 - Purpose: Runs the QA pipeline with strategy `no`, `single`, `multi`, or `all`.
 - Main outputs: Prediction JSON for selected strategy/strategies.
-- Special behavior: Can load a prebuilt index from `--index-dir`, or rebuild/save it as needed.
+- Special behavior: Requires a prebuilt index in `--index-dir` (must contain `documents.json`); exits with an error if missing.
+- Parallel behavior: Supports python-based local sharding with `--num-procs` (no `torchrun` needed).
 - Run when: To generate answers/predictions for train/dev/test questions.
 
 4. `scripts/generate_labels.py`
@@ -142,21 +143,21 @@ python scripts/build_index.py --config configs/retriever.yaml --corpus data/hotp
 Single-GPU / single-process:
 
 ```bash
-python scripts/run_rag_pipelines.py --config configs/train.yaml --questions data/hotpotqa/train.jsonl --corpus data/hotpotqa/corpus.jsonl --index-dir outputs/index --output outputs/predictions.json
+python scripts/run_rag_pipelines.py --config configs/train.yaml --questions data/hotpotqa/train.jsonl --index-dir outputs/index --output outputs/predictions.json
 ```
 
-Multi-GPU with torchrun:
+Multi-GPU with python dataset sharding:
 
 ```bash
-torchrun --standalone --nproc_per_node=4 scripts/run_rag_pipelines.py --config configs/train.yaml --questions data/hotpotqa/train.jsonl --corpus data/hotpotqa/corpus.jsonl --index-dir outputs/index --output outputs/predictions.json --save-index
+python scripts/run_rag_pipelines.py --config configs/train.yaml --questions data/hotpotqa/train.jsonl --index-dir outputs/index --output outputs/predictions.json --num-procs 4
 ```
 
 Index reuse behavior:
 
-- If `--index-dir` contains `index.faiss` and `documents.json`, they are loaded.
-- Otherwise the index is built from `--corpus`.
-- Use `--save-index` to persist a newly built index.
-- Use `--rebuild-index` to force rebuilding even when saved index files exist.
+- `scripts/run_rag_pipelines.py` no longer auto-builds an index.
+- `--index-dir` is required and must contain `documents.json`.
+- If the index is missing, the script exits with a clear error.
+- Build (or rebuild) the index first with `scripts/build_index.py`.
 
 ### 4) Generate weak labels (required before classifier training)
 

@@ -8,12 +8,14 @@ from tqdm.auto import tqdm
 
 
 def normalize_answer(text: str) -> str:
+	print("[preprocessing] Normalizing answer", flush=True)
 	text = text.lower()
 	text = re.sub(f"[{string.punctuation}]", "", text)
 	return " ".join(text.split())
 
 
 def load_records(path: Union[str, Path]) -> List[Dict[str, Any]]:
+	print(f"[preprocessing] Loading records from {path}", flush=True)
 	source_path = Path(path)
 	if not source_path.exists():
 		raise FileNotFoundError(f"Input file not found: {source_path}")
@@ -71,6 +73,7 @@ def extract_text(record: Dict[str, Any]) -> str:
 
 
 def extract_qa_records(records: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+	print("[preprocessing] Extracting QA records", flush=True)
 	examples: List[Dict[str, Any]] = []
 	for record in tqdm(records, desc="Extracting QA records", unit="record"):
 		question = record.get("question") or record.get("query")
@@ -92,6 +95,7 @@ def extract_qa_records(records: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]
 
 
 def extract_documents(records: Iterable[Dict[str, Any]]) -> List[str]:
+	print("[preprocessing] Extracting documents", flush=True)
 	documents = []
 	for record in tqdm(records, desc="Extracting documents", unit="record"):
 		text = extract_text(record)

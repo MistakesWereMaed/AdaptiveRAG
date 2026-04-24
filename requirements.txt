@@ -1,4 +1,4 @@
-faiss-gpu
+qdrant-client
 datasets
 numpy
 pytorch-lightning

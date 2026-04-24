@@ -18,6 +18,7 @@ def exact_match(prediction: str, reference: str) -> float:
 
 
 def main():
+	print("[evaluate] Starting evaluation", flush=True)
 	parser = argparse.ArgumentParser(description="Evaluate QA predictions")
 	parser.add_argument("--config", default="configs/train.yaml", help="Path to evaluation config")
 	parser.add_argument("--predictions", default=None, help="Path to predictions JSON/JSONL")
@@ -35,6 +36,7 @@ def main():
 
 	predictions = load_records(predictions_path)
 	references = extract_qa_records(load_records(references_path))
+	print(f"[evaluate] Loaded {len(predictions)} predictions and {len(references)} references", flush=True)
 
 	if len(predictions) != len(references):
 		raise ValueError("Predictions and references must contain the same number of records")
@@ -53,6 +55,7 @@ def main():
 	}
 
 	print(json.dumps(metrics, indent=2))
+	print("[evaluate] Finished evaluation", flush=True)
 
 
 if __name__ == "__main__":

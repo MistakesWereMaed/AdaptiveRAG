@@ -14,6 +14,7 @@ def _to_int(strategy: Any) -> int:
 
 
 def route(question, classifier, llm, retriever, k: int = 5, steps: int = 2):
+    print("[router] Routing a question", flush=True)
     if hasattr(classifier, "predict"):
         strategy = classifier.predict(question)
     else:

@@ -4,6 +4,7 @@ from collections import Counter
 
 
 def normalize(text):
+    print("[eval] Normalizing text", flush=True)
     text = text.lower()
     text = re.sub(f"[{string.punctuation}]", "", text)
     text = " ".join(text.split())
@@ -11,6 +12,7 @@ def normalize(text):
 
 
 def compute_f1(pred, gold):
+    print("[eval] Computing F1", flush=True)
     pred_tokens = normalize(pred).split()
     gold_tokens = normalize(gold).split()
 

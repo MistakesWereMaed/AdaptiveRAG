@@ -11,6 +11,7 @@ from src.data.preprocessing import extract_qa_records, load_records
 
 class RouterDataset(Dataset):
 	def __init__(self, records: Sequence[Dict[str, object]]):
+		print(f"[RouterDataset] Building dataset from {len(records)} records", flush=True)
 		self.records = [record for record in records if isinstance(record.get("question"), str) and record.get("label") is not None]
 
 	def __len__(self) -> int:
@@ -27,6 +28,7 @@ class RouterDataset(Dataset):
 class RouterDataModule(pl.LightningDataModule):
 	def __init__(self, train_data, val_data=None, model_name: str = "bert-base-uncased", batch_size: int = 8, max_length: int = 256, num_workers: int = 0):
 		super().__init__()
+		print(f"[RouterDataModule] Initializing model={model_name} batch_size={batch_size}", flush=True)
 		self.train_data = train_data
 		self.val_data = val_data
 		self.model_name = model_name
@@ -38,6 +40,7 @@ class RouterDataModule(pl.LightningDataModule):
 		self.val_dataset = None
 
 	def _load_records(self, source):
+		print(f"[RouterDataModule] Loading records from {source}", flush=True)
 		if isinstance(source, (str, Path)):
 			records = load_records(source)
 		else:
@@ -45,6 +48,7 @@ class RouterDataModule(pl.LightningDataModule):
 		return extract_qa_records(records)
 
 	def setup(self, stage: Optional[str] = None):
+		print(f"[RouterDataModule] Setup stage={stage}", flush=True)
 		if self.train_dataset is None:
 			train_records = self._load_records(self.train_data)
 			dataset = RouterDataset(train_records)
@@ -68,6 +72,7 @@ class RouterDataModule(pl.LightningDataModule):
 				self.val_dataset = RouterDataset(self._load_records(self.val_data))
 
 	def _collate(self, batch: List[Dict[str, object]]):
+		print(f"[RouterDataModule] Collating batch of {len(batch)} examples", flush=True)
 		questions = [item["question"] for item in batch]
 		labels = torch.tensor([item["label"] for item in batch], dtype=torch.long)
 		encoded = self.tokenizer(

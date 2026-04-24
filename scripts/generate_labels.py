@@ -49,6 +49,7 @@ def _load_predictions(path: str | Path) -> Dict[str, list]:
 
 
 def main():
+    print("[generate_labels] Starting label generation", flush=True)
     parser = argparse.ArgumentParser(description="Generate weak labels for Adaptive-RAG routing")
     parser.add_argument("--config", default="configs/train.yaml", help="Path to runtime config")
     parser.add_argument("--dataset", default=None, help="Path to QA dataset JSON/JSONL")
@@ -70,6 +71,7 @@ def main():
 
     dataset = extract_qa_records(load_records(dataset_path))
     outputs = _load_predictions(predictions_path)
+    print(f"[generate_labels] Loaded {len(dataset)} examples and predictions from {predictions_path}", flush=True)
 
     total_examples = len(dataset)
     for strategy in ("no", "single", "multi"):
@@ -105,6 +107,7 @@ def main():
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8") as handle:
         json.dump(results, handle, indent=2)
+    print(f"[generate_labels] Wrote labels to {output_path}", flush=True)
 
 
 if __name__ == "__main__":

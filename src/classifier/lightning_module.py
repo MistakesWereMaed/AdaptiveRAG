@@ -11,6 +11,7 @@ from .model import RouterClassifier
 class RouterLightningModule(pl.LightningModule):
     def __init__(self, model_name: str = "bert-base-uncased", num_classes: int = 3, learning_rate: float = 2e-5):
         super().__init__()
+        print(f"[RouterLightningModule] Initializing model={model_name} lr={learning_rate}", flush=True)
         self.save_hyperparameters()
         self.model = RouterClassifier(model_name=model_name, num_classes=num_classes)
 
@@ -18,6 +19,7 @@ class RouterLightningModule(pl.LightningModule):
         return self.model(input_ids=input_ids, attention_mask=attention_mask)
 
     def _step(self, batch: Dict[str, torch.Tensor], prefix: str):
+        print(f"[RouterLightningModule] Running {prefix} step", flush=True)
         logits = self.forward(batch["input_ids"], batch.get("attention_mask"))
         loss = F.cross_entropy(logits, batch["labels"])
         predictions = torch.argmax(logits, dim=-1)

@@ -9,7 +9,7 @@ from tqdm.auto import tqdm
 from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
-    BitsAndBytesConfig
+    BitsAndBytesConfig,
 )
 
 from src.utils.config import load_yaml_config
@@ -26,6 +26,10 @@ class LocalLLM:
         config_path: Union[str, Path] = "configs/llm.yaml",
         compile_model: Optional[bool] = None,
     ):
+        print(
+            f"[LocalLLM] Initializing model={model_name or 'config-default'} device={device or 'config-default'}",
+            flush=True,
+        )
         config = load_yaml_config(config_path)
 
         if model_name is None:
@@ -63,10 +67,12 @@ class LocalLLM:
             )
 
         # ---- Tokenizer ----
+        print("[LocalLLM] Loading tokenizer", flush=True)
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.tokenizer.pad_token = self.tokenizer.eos_token
 
         # ---- Model ----
+        print("[LocalLLM] Loading model", flush=True)
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
             quantization_config=quant_config,
@@ -75,7 +81,9 @@ class LocalLLM:
         )
 
         self.model.eval()
+        print("[LocalLLM] Model ready", flush=True)
         if compile_model:
+            print("[LocalLLM] Compiling model", flush=True)
             self.model = torch.compile(self.model)
 
         # ---- Cache ----
@@ -101,13 +109,12 @@ class LocalLLM:
                 f"Question:\n{question}\n"
                 "[/INST]"
             )
-        else:
-            return (
-                "[INST]\n"
-                "Answer the question.\n\n"
-                f"Question:\n{question}\n"
-                "[/INST]"
-            )
+        return (
+            "[INST]\n"
+            "Answer the question.\n\n"
+            f"Question:\n{question}\n"
+            "[/INST]"
+        )
 
     # --------------------------------------------------
     # Cache utilities
@@ -125,6 +132,7 @@ class LocalLLM:
 
     def save_cache(self):
         if self.cache_path:
+            print(f"[LocalLLM] Saving cache to {self.cache_path}", flush=True)
             with open(self.cache_path, "w") as f:
                 json.dump(self.cache, f)
 
@@ -139,7 +147,6 @@ class LocalLLM:
         batch_size: Optional[int] = None,
         use_cache: Optional[bool] = None,
     ) -> List[str]:
-
         if max_new_tokens is None:
             max_new_tokens = self.default_max_new_tokens
         if batch_size is None:
@@ -150,13 +157,15 @@ class LocalLLM:
         if isinstance(prompts, str):
             prompts = [prompts]
 
+        print(f"[LocalLLM] Generating {len(prompts)} prompt(s)", flush=True)
+
         results = []
 
         # ---- batching ----
         prompts = sorted(prompts, key=len)
         batch_starts = range(0, len(prompts), batch_size)
         for i in tqdm(batch_starts, desc="Generating", unit="batch"):
-            batch_prompts = prompts[i:i + batch_size]
+            batch_prompts = prompts[i : i + batch_size]
 
             uncached_prompts = []
             uncached_indices = []
@@ -180,7 +189,7 @@ class LocalLLM:
                     return_tensors="pt",
                     padding=True,
                     truncation=True,
-                    max_length=self.max_input_length
+                    max_length=self.max_input_length,
                 ).to(self.model.device)
 
                 outputs = self.model.generate(
@@ -190,10 +199,7 @@ class LocalLLM:
                     pad_token_id=self.tokenizer.eos_token_id,
                 )
 
-                decoded = self.tokenizer.batch_decode(
-                    outputs,
-                    skip_special_tokens=True
-                )
+                decoded = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)
 
                 # ---- store outputs ----
                 for idx, text in zip(uncached_indices, decoded):
@@ -212,9 +218,8 @@ class LocalLLM:
         self,
         questions: Union[str, List[str]],
         contexts: Optional[Union[str, List[str]]] = None,
-        **gen_kwargs
+        **gen_kwargs,
     ) -> List[str]:
-
         if isinstance(questions, str):
             questions = [questions]
 
@@ -223,10 +228,9 @@ class LocalLLM:
         elif isinstance(contexts, str):
             contexts = [contexts]
 
-        prompts = [
-            self.format_prompt(q, c)
-            for q, c in zip(questions, contexts)
-        ]
+        print(f"[LocalLLM] Answering {len(questions)} question(s)", flush=True)
+
+        prompts = [self.format_prompt(q, c) for q, c in zip(questions, contexts)]
 
         return self.generate(prompts, **gen_kwargs)
 

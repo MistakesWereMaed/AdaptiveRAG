@@ -1,39 +1,19 @@
 import argparse
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
-import torch
-import torch.distributed as dist
+from tqdm.auto import tqdm
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.data.preprocessing import extract_documents, extract_qa_records, load_records
+from src.data.preprocessing import extract_qa_records, load_records
 from src.llm import LocalLLM
 from src.pipeline import AdaptiveRAGPipeline
-from src.retrieval.retriever import Retriever
+from src.retriever import Retriever
 from src.utils.config import load_yaml_config
-
-
-def get_world_size() -> int:
-    return int(os.environ.get("WORLD_SIZE", "1"))
-
-
-def get_rank() -> int:
-    return int(os.environ.get("RANK", "0"))
-
-
-def get_local_rank() -> int:
-    return int(os.environ.get("LOCAL_RANK", "0"))
-
-
-def is_distributed() -> bool:
-    return get_world_size() > 1
-
-
-def is_main_process() -> bool:
-    return get_rank() == 0
 
 
 def _prepare_questions(source):
@@ -57,88 +37,47 @@ def _prepare_questions(source):
     return questions
 
 
-def _init_distributed_if_needed(backend: str = "nccl"):
-    if not is_distributed():
-        return False
-
-    if torch.cuda.is_available():
-        torch.cuda.set_device(get_local_rank())
-
-    if not dist.is_initialized():
-        dist.init_process_group(backend=backend)
-
-    return True
-
-
-def _shard_questions(questions):
-    world_size = get_world_size()
-    rank = get_rank()
+def _shard_questions(questions, rank: int, world_size: int):
     indexed_questions = list(enumerate(questions))
     return indexed_questions[rank::world_size]
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Run Adaptive RAG pipelines")
-    parser.add_argument("--config", default="configs/train.yaml", help="Path to runtime config")
-    parser.add_argument("--questions", default=None, help="Path to questions or QA file")
-    parser.add_argument("--corpus", default=None, help="Path to retrieval corpus")
-    parser.add_argument("--output", default=None, help="Output JSON file")
-    parser.add_argument("--strategy", choices=["no", "single", "multi", "all"], default=None)
-    parser.add_argument("--index-dir", default=None, help="Directory containing index.faiss and documents.json")
-    parser.add_argument("--rebuild-index", action="store_true", help="Force rebuilding the index even if saved files exist")
-    parser.add_argument("--save-index", action="store_true", help="Save a newly built index to --index-dir")
-    parser.add_argument("--encoder", default=None)
-    parser.add_argument("--model-name", default=None)
-    parser.add_argument("--ddp-backend", default="nccl", choices=["nccl", "gloo"])
-    args = parser.parse_args()
+def _require_index_dir(index_dir: str | None) -> Path:
+    if not index_dir:
+        raise ValueError(
+            "A prebuilt index directory is required. Provide --index-dir with documents.json. "
+            "Run scripts/build_index.py first."
+        )
 
-    distributed = _init_distributed_if_needed(args.ddp_backend)
+    index_path = Path(index_dir)
+    documents_path = index_path / "documents.json"
+    if not documents_path.exists():
+        raise FileNotFoundError(
+            f"Prebuilt index not found at {index_path}. Expected {documents_path.name}. "
+            "Run scripts/build_index.py first."
+        )
+    return index_path
 
-    config = load_yaml_config(args.config)
-    questions_path = args.questions or config.get("questions")
-    corpus_path = args.corpus or config.get("corpus")
-    output_path = Path(args.output or config.get("output", "outputs/predictions.json"))
-    strategy = args.strategy or config.get("strategy", "all")
-    index_dir = args.index_dir or config.get("index_dir")
-    rebuild_index = args.rebuild_index or bool(config.get("rebuild_index", False))
-    save_index = args.save_index or bool(config.get("save_index", False))
-    encoder_name = args.encoder or config.get("encoder_name", "all-MiniLM-L6-v2")
-    model_name = args.model_name or config.get("model_name", "mistralai/Mistral-7B-v0.1")
 
-    if questions_path is None:
-        raise ValueError("A questions path must be provided via --questions or the config file")
-    if corpus_path is None:
-        raise ValueError("A corpus path must be provided via --corpus or the config file")
-
+def _run_shard(
+    questions_path: str,
+    strategy: str,
+    output_path: Path,
+    index_dir: str,
+    encoder_name: str,
+    model_name: str,
+    rank: int,
+    world_size: int,
+    shard_dir: Path,
+):
     questions = _prepare_questions(questions_path)
-    sharded_questions = _shard_questions(questions) if distributed else list(enumerate(questions))
+    sharded_questions = _shard_questions(questions, rank=rank, world_size=world_size)
     local_indices = [index for index, _ in sharded_questions]
     local_questions = [question for _, question in sharded_questions]
 
     llm = LocalLLM(model_name=model_name)
     retriever = Retriever(encoder_name=encoder_name)
-
-    loaded_index = False
-    if index_dir and not rebuild_index:
-        index_path = Path(index_dir)
-        if (index_path / "index.faiss").exists() and (index_path / "documents.json").exists():
-            retriever.load_index(index_path)
-            loaded_index = True
-
-    if not loaded_index:
-        if distributed and index_dir:
-            if is_main_process():
-                corpus_documents = extract_documents(load_records(corpus_path))
-                retriever.build_index(corpus_documents)
-                retriever.save_index(index_dir)
-            dist.barrier()
-            retriever.load_index(index_dir)
-        else:
-            corpus_documents = extract_documents(load_records(corpus_path))
-            retriever.build_index(corpus_documents)
-
-            if index_dir and save_index:
-                retriever.save_index(index_dir)
+    retriever.load_index(_require_index_dir(index_dir))
 
     pipeline = AdaptiveRAGPipeline(llm, retriever)
 
@@ -151,41 +90,175 @@ def main():
     else:
         local_result = pipeline.run_all(local_questions)
 
-    if distributed:
-        gathered = [None for _ in range(get_world_size())]
-        payload = {
-            "indices": local_indices,
-            "result": local_result,
-        }
-        dist.all_gather_object(gathered, payload)
+    shard_dir.mkdir(parents=True, exist_ok=True)
+    shard_payload = {
+        "indices": local_indices,
+        "result": local_result,
+    }
+    shard_file = shard_dir / f"{output_path.stem}.rank{rank}.json"
+    with shard_file.open("w", encoding="utf-8") as handle:
+        json.dump(shard_payload, handle, indent=2)
 
-        if is_main_process():
-            merged = {}
-            keys = gathered[0]["result"].keys() if gathered else []
-            for key in keys:
+
+def _launch_workers(
+    args,
+    questions_path: str,
+    output_path: Path,
+    strategy: str,
+    index_dir: str,
+    encoder_name: str,
+    model_name: str,
+    shard_dir: Path,
+):
+    questions = _prepare_questions(questions_path)
+    shard_dir.mkdir(parents=True, exist_ok=True)
+
+    for old_shard in shard_dir.glob(f"{output_path.stem}.rank*.json"):
+        old_shard.unlink()
+
+    raw_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+    visible_devices = [item.strip() for item in raw_visible_devices.split(",") if item.strip()]
+
+    worker_processes = []
+    for rank in range(args.num_procs):
+        cmd = [
+            sys.executable,
+            str(Path(__file__).resolve()),
+            "--config",
+            args.config,
+            "--questions",
+            questions_path,
+            "--output",
+            str(output_path),
+            "--strategy",
+            strategy,
+            "--index-dir",
+            index_dir,
+            "--encoder",
+            encoder_name,
+            "--model-name",
+            model_name,
+            "--worker-rank",
+            str(rank),
+            "--world-size",
+            str(args.num_procs),
+            "--num-procs",
+            "1",
+            "--shard-dir",
+            str(shard_dir),
+        ]
+
+        env = os.environ.copy()
+        if visible_devices and rank < len(visible_devices):
+            env["CUDA_VISIBLE_DEVICES"] = visible_devices[rank]
+
+        worker_processes.append(subprocess.Popen(cmd, env=env))
+
+    for process in tqdm(worker_processes, desc="Waiting for worker shards", unit="worker"):
+        return_code = process.wait()
+        if return_code != 0:
+            raise RuntimeError(f"Worker process failed with exit code {return_code}")
+
+    merged = {}
+    for rank in range(args.num_procs):
+        shard_file = shard_dir / f"{output_path.stem}.rank{rank}.json"
+        if not shard_file.exists():
+            raise FileNotFoundError(f"Expected shard output missing: {shard_file}")
+
+        with shard_file.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+
+        indices = payload["indices"]
+        result = payload["result"]
+        for key in result.keys():
+            if key not in merged:
                 merged[key] = [None] * len(questions)
+        for key, values in result.items():
+            for idx, value in zip(indices, values):
+                merged[key][idx] = value
 
-            for item in gathered:
-                indices = item["indices"]
-                result = item["result"]
-                for key, values in result.items():
-                    for idx, value in zip(indices, values):
-                        merged[key][idx] = value
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8") as handle:
+        json.dump(merged, handle, indent=2)
 
-            result = merged
-        else:
-            result = None
-    else:
-        result = local_result
 
-    if not distributed or is_main_process():
+def main():
+    parser = argparse.ArgumentParser(description="Run Adaptive RAG pipelines")
+    parser.add_argument("--config", default="configs/train.yaml", help="Path to runtime config")
+    parser.add_argument("--questions", default=None, help="Path to questions or QA file")
+    parser.add_argument("--output", default=None, help="Output JSON file")
+    parser.add_argument("--strategy", choices=["no", "single", "multi", "all"], default=None)
+    parser.add_argument("--index-dir", default=None, help="Directory containing saved retriever metadata (documents.json)")
+    parser.add_argument("--encoder", default=None)
+    parser.add_argument("--model-name", default=None)
+    parser.add_argument("--num-procs", type=int, default=1, help="Number of local worker processes for dataset sharding")
+    parser.add_argument("--worker-rank", type=int, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--world-size", type=int, default=1, help=argparse.SUPPRESS)
+    parser.add_argument("--shard-dir", default=None, help="Directory for temporary shard outputs")
+    args = parser.parse_args()
+
+    config = load_yaml_config(args.config)
+    questions_path = args.questions or config.get("questions")
+    output_path = Path(args.output or config.get("output", "outputs/predictions.json"))
+    strategy = args.strategy or config.get("strategy", "all")
+    index_dir = args.index_dir or config.get("index_dir")
+    encoder_name = args.encoder or config.get("encoder_name", "all-MiniLM-L6-v2")
+    model_name = args.model_name or config.get("model_name", "mistralai/Mistral-7B-v0.1")
+    shard_dir = Path(args.shard_dir or output_path.parent / f"{output_path.stem}_shards")
+
+    if questions_path is None:
+        raise ValueError("A questions path must be provided via --questions or the config file")
+    _require_index_dir(index_dir)
+
+    # Launcher mode: spawn local workers with plain python and merge shard files.
+    if args.worker_rank is None and args.num_procs > 1:
+        _launch_workers(
+            args=args,
+            questions_path=questions_path,
+            output_path=output_path,
+            strategy=strategy,
+            index_dir=index_dir,
+            encoder_name=encoder_name,
+            model_name=model_name,
+            shard_dir=shard_dir,
+        )
+        return
+
+    # Single-process mode or worker mode.
+    rank = 0 if args.worker_rank is None else args.worker_rank
+    world_size = 1 if args.worker_rank is None else args.world_size
+
+    if args.worker_rank is None:
+        _run_shard(
+            questions_path=questions_path,
+            strategy=strategy,
+            output_path=output_path,
+            index_dir=index_dir,
+            encoder_name=encoder_name,
+            model_name=model_name,
+            rank=rank,
+            world_size=world_size,
+            shard_dir=shard_dir,
+        )
+        shard_file = shard_dir / f"{output_path.stem}.rank0.json"
+        with shard_file.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with output_path.open("w", encoding="utf-8") as handle:
-            json.dump(result, handle, indent=2)
+            json.dump(payload["result"], handle, indent=2)
+        return
 
-    if distributed and dist.is_initialized():
-        dist.barrier()
-        dist.destroy_process_group()
+    _run_shard(
+        questions_path=questions_path,
+        strategy=strategy,
+        output_path=output_path,
+        index_dir=index_dir,
+        encoder_name=encoder_name,
+        model_name=model_name,
+        rank=rank,
+        world_size=world_size,
+        shard_dir=shard_dir,
+    )
 
 
 if __name__ == "__main__":

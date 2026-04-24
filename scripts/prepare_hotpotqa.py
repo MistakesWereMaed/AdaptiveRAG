@@ -31,6 +31,7 @@ def _build_corpus(records):
 
 
 def main():
+	print("[prepare_hotpotqa] Starting HotpotQA preprocessing", flush=True)
 	parser = argparse.ArgumentParser(description="Download and preprocess HotpotQA")
 	parser.add_argument("--output-dir", default="data/hotpotqa", help="Directory for processed HotpotQA files")
 	parser.add_argument("--config-name", default="distractor", choices=["distractor", "fullwiki"], help="HotpotQA configuration to load")
@@ -41,11 +42,13 @@ def main():
 	output_dir.mkdir(parents=True, exist_ok=True)
 
 	for split in tqdm(("train", "validation"), desc="HotpotQA splits", unit="split"):
+		print(f"[prepare_hotpotqa] Loading split={split}", flush=True)
 		dataset = load_hotpotqa_split(split=split, config_name=args.config_name)
 		records = hotpotqa_dataset_to_records(dataset)
 		_write_jsonl(records, output_dir / f"{split}.jsonl")
 
 		if args.build_corpus and split == "train":
+			print("[prepare_hotpotqa] Building corpus from train split", flush=True)
 			corpus = _build_corpus(records)
 			if not corpus:
 				raise ValueError("HotpotQA corpus extraction produced no passages; check the dataset schema or config name")

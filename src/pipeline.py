@@ -1,5 +1,4 @@
 from typing import List, Dict
-
 from tqdm.auto import tqdm
 
 
@@ -15,66 +14,54 @@ class AdaptiveRAGPipeline:
         return self.llm.answer(questions)
 
     # --------------------------------------------------
-    # Strategy 1: Single-step RAG
+    # Strategy 1: Single-step RAG (Qdrant)
     # --------------------------------------------------
     def single_step(self, questions: List[str], k: int = 5) -> List[str]:
-        # -----------------------------
-        # 1. Encode all queries (progress bar)
-        # -----------------------------
-        q_embeddings = self.retriever.encoder.encode(
-            questions,
-            convert_to_numpy=True,
-            batch_size=256,
-            show_progress_bar=True  # sentence-transformers internal tqdm
-        )
-
-        # -----------------------------
-        # 2. FAISS retrieval
-        # -----------------------------
-        _, I = self.retriever.index.search(q_embeddings, k)
-
-        # -----------------------------
-        # 3. Build contexts
-        # -----------------------------
         contexts = []
 
-        for idxs in tqdm(I, desc="Building contexts", unit="query"):
-            docs = [
-                self.retriever.texts[int(i)]
-                for i in idxs
-                if 0 <= int(i) < len(self.retriever.texts)
-            ]
+        for q in tqdm(questions, desc="Retrieving", unit="query"):
+            docs = self.retriever.retrieve(q, k=k)
             context = "\n".join(docs)
             contexts.append(context)
 
-        # -----------------------------
-        # 4. LLM generation
-        # -----------------------------
         return self.llm.answer(questions, contexts)
 
     # --------------------------------------------------
-    # Strategy 2: Multi-step RAG (batched)
+    # Strategy 2: Multi-step RAG (Qdrant)
     # --------------------------------------------------
     def multi_step(self, questions: List[str], steps: int = 2, k: int = 3) -> List[str]:
         all_contexts = [[] for _ in questions]
 
         for step in tqdm(range(steps), desc="Multi-step retrieval", unit="step"):
-            queries = []
 
-            for i, q in enumerate(questions):
-                if step == 0:
-                    queries.append(q)
-                else:
-                    partial_context = " ".join(all_contexts[i])
-                    queries.append(f"{q} {partial_context}")
+            # -----------------------------------------
+            # Build queries (same logic as before)
+            # -----------------------------------------
+            if step == 0:
+                queries = questions
+            else:
+                queries = [
+                    q + " " + " ".join(all_contexts[i])
+                    for i, q in enumerate(questions)
+                ]
 
-            # batch retrieval
-            batch_docs = [self.retriever.retrieve(q, k=k) for q in queries]
+            # -----------------------------------------
+            # Qdrant retrieval (batch loop but simple API)
+            # -----------------------------------------
+            batch_docs = [
+                self.retriever.retrieve(q, k=k)
+                for q in queries
+            ]
 
+            # -----------------------------------------
+            # Accumulate contexts
+            # -----------------------------------------
             for i, docs in enumerate(batch_docs):
                 all_contexts[i].extend(docs)
 
-        final_contexts = ["\n".join(ctx) for ctx in all_contexts]
+        final_contexts = [
+            "\n".join(ctx) for ctx in all_contexts
+        ]
 
         return self.llm.answer(questions, final_contexts)
 

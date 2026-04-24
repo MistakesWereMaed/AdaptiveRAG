@@ -8,10 +8,12 @@ from datasets import load_dataset
 
 
 def load_hotpotqa_split(split: str = "train", config_name: str = "distractor"):
+	print(f"[hotpotqa] Loading split={split} config={config_name}", flush=True)
 	return load_dataset("hotpot_qa", config_name, split=split)
 
 
 def hotpotqa_context_to_documents(context: Any) -> List[str]:
+	print("[hotpotqa] Converting context to documents", flush=True)
 	documents: List[str] = []
 
 	if isinstance(context, str):
@@ -57,6 +59,7 @@ def hotpotqa_context_to_documents(context: Any) -> List[str]:
 
 
 def hotpotqa_record_to_example(record: Dict[str, Any]) -> Dict[str, Any]:
+	print("[hotpotqa] Converting record to example", flush=True)
 	context_documents = hotpotqa_context_to_documents(record.get("context"))
 	return {
 		"id": record.get("id"),
@@ -71,10 +74,12 @@ def hotpotqa_record_to_example(record: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def hotpotqa_dataset_to_records(dataset: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+	print("[hotpotqa] Converting dataset to records", flush=True)
 	return [hotpotqa_record_to_example(record) for record in tqdm(dataset, desc="Converting HotpotQA", unit="example")]
 
 
 def save_jsonl(records: Iterable[Dict[str, Any]], output_path: str | Path) -> None:
+	print(f"[hotpotqa] Saving JSONL to {output_path}", flush=True)
 	output_file = Path(output_path)
 	output_file.parent.mkdir(parents=True, exist_ok=True)
 	with output_file.open("w", encoding="utf-8") as handle:
