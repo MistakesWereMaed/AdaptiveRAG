@@ -2,198 +2,119 @@ import json
 from pathlib import Path
 from typing import List, Sequence
 
+import numpy as np
+import faiss
+from sentence_transformers import SentenceTransformer
 from tqdm.auto import tqdm
 
-from sentence_transformers import SentenceTransformer
-from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct
 
-
-class Retriever:
+class FaissIVFRetriever:
     def __init__(
         self,
         encoder_name: str = "all-MiniLM-L6-v2",
-        collection_name: str = "retrieval_index"
+        nlist: int = 4096,   # number of clusters (tune this)
     ):
-        print(f"[Retriever] Initializing encoder={encoder_name} collection={collection_name}", flush=True)
         self.encoder = SentenceTransformer(encoder_name)
-        self.collection_name = collection_name
+        self.index = None
 
-        # local in-memory / on-disk Qdrant
-        self.client = QdrantClient(path=".qdrant_db")
-
-        self.texts: List[str] = []
-
-    # --------------------------------------------------
-    # Build index
-    # --------------------------------------------------
-    def build_index(self, documents: List[str]):
-        print(f"[Retriever] Building index for {len(documents)} documents", flush=True)
-        if not documents:
-            raise ValueError("No documents provided")
-
-        self.texts = documents
-
-        embeddings = self.encoder.encode(
-            documents,
-            convert_to_numpy=True,
-            show_progress_bar=True,
-            batch_size=256
-        ).astype("float32")
-
-        dim = embeddings.shape[1]
-
-        # create collection
-        self.client.recreate_collection(
-            collection_name=self.collection_name,
-            vectors_config=VectorParams(size=dim, distance=Distance.COSINE)
-        )
-
-        # insert points
-        points = [
-            PointStruct(
-                id=i,
-                vector=embeddings[i],
-                payload={"text": documents[i]}
-            )
-            for i in tqdm(range(len(documents)), desc="Indexing", unit="doc")
-        ]
-
-        self.client.upsert(
-            collection_name=self.collection_name,
-            points=points
-        )
-
-    # --------------------------------------------------
-    # Retrieve
-    # --------------------------------------------------
-    def retrieve(self, query: str, k: int = 5):
-        print(f"[Retriever] Retrieving top-{k} documents", flush=True)
-        if not self.texts:
-            raise ValueError("Index not built yet")
-
-        q_emb = self.encoder.encode([query], convert_to_numpy=True).astype("float32")[0]
-
-        if hasattr(self.client, "query_points"):
-            results = self.client.query_points(
-                collection_name=self.collection_name,
-                query=q_emb,
-                limit=k,
-                with_payload=True,
-            )
-            points = results.points
-        else:
-            points = self.client.search(
-                collection_name=self.collection_name,
-                query_vector=q_emb,
-                limit=k,
-                with_payload=True,
-            )
-
-        return [hit.payload["text"] for hit in points if hit.payload and "text" in hit.payload]
-
-    # --------------------------------------------------
-    # Save / Load (Qdrant handles persistence automatically)
-    # --------------------------------------------------
-    def save_index(self, path: str):
-        print(f"[Retriever] Saving index metadata to {path}", flush=True)
-        Path(path).mkdir(parents=True, exist_ok=True)
-        with open(Path(path) / "documents.json", "w") as f:
-            json.dump(self.texts, f)
-
-    def load_index(self, path: str):
-        print(f"[Retriever] Loading index metadata from {path}", flush=True)
-        with open(Path(path) / "documents.json", "r", encoding="utf-8") as f:
-            self.texts = json.load(f)
-
-        # Recreate the collection from saved docs so loading works even if
-        # .qdrant_db is empty or was removed.
-        self.build_index(self.texts)
-
-
-class QdrantRetrieverIndex:
-    def __init__(
-        self,
-        encoder_name: str = "all-MiniLM-L6-v2",
-        collection_name: str = "qdrant",
-    ):
-        print(f"[QdrantRetrieverIndex] Initializing encoder={encoder_name} collection={collection_name}", flush=True)
-        self.encoder = SentenceTransformer(encoder_name)
-        self.collection_name = collection_name
-        self.client = QdrantClient(path=".qdrant_db")
+        self.nlist = nlist
         self.documents: List[str] = []
 
-    def build(self, documents: Sequence[str]) -> None:
-        print(f"[QdrantRetrieverIndex] Building index for {len(documents)} documents", flush=True)
-        self.documents = [document for document in documents if document]
+        self.dim = None
+
+    # --------------------------------------------------
+    # Build index (FAISS IVF training + add)
+    # --------------------------------------------------
+    def build(self, documents: Sequence[str], batch_size: int = 1024):
+
+        self.documents = [d for d in documents if d]
         if not self.documents:
             raise ValueError("No documents provided")
+
+        print(f"[FAISS] Encoding {len(self.documents)} documents", flush=True)
 
         embeddings = self.encoder.encode(
             self.documents,
             convert_to_numpy=True,
+            batch_size=batch_size,
             show_progress_bar=True,
-            batch_size=256,
         ).astype("float32")
 
-        self.client.recreate_collection(
-            collection_name=self.collection_name,
-            vectors_config=VectorParams(size=embeddings.shape[1], distance=Distance.COSINE),
+        self.dim = embeddings.shape[1]
+
+        # -----------------------------
+        # Normalize (important for cosine)
+        # -----------------------------
+        print("[FAISS] Normalizing embeddings...", flush=True)
+        faiss.normalize_L2(embeddings)
+
+        # -----------------------------
+        # IVF index
+        # -----------------------------
+        print("[FAISS] Creating IVF index...", flush=True)
+        quantizer = faiss.IndexFlatIP(self.dim)
+        self.index = faiss.IndexIVFFlat(
+            quantizer,
+            self.dim,
+            self.nlist,
+            faiss.METRIC_INNER_PRODUCT
         )
 
-        points = [
-            PointStruct(id=i, vector=embeddings[i], payload={"text": self.documents[i]})
-            for i in tqdm(range(len(self.documents)), desc="Indexing", unit="doc")
-        ]
+        print("[FAISS] Training IVF index...", flush=True)
+        self.index.train(embeddings)
 
-        self.client.upsert(collection_name=self.collection_name, points=points)
+        print("[FAISS] Adding vectors...", flush=True)
+        self.index.add(embeddings)
 
-    def search(self, query: str, k: int = 5) -> List[str]:
-        print(f"[QdrantRetrieverIndex] Searching top-{k} documents", flush=True)
-        if not self.documents:
-            raise ValueError("Index not built yet")
+        print("[FAISS] Build complete", flush=True)
 
-        q_emb = self.encoder.encode([query], convert_to_numpy=True).astype("float32")[0]
+    # --------------------------------------------------
+    # Batch retrieval
+    # --------------------------------------------------
+    def retrieve(self, queries: List[str], k: int = 5) -> List[List[str]]:
 
-        if hasattr(self.client, "query_points"):
-            response = self.client.query_points(
-                collection_name=self.collection_name,
-                query=q_emb,
-                limit=k,
-                with_payload=True,
-            )
-            points = response.points
-        else:
-            points = self.client.search(
-                collection_name=self.collection_name,
-                query_vector=q_emb,
-                limit=k,
-                with_payload=True,
-            )
+        q_emb = self.encoder.encode(
+            queries,
+            convert_to_numpy=True,
+            batch_size=1024,
+            show_progress_bar=False,
+        ).astype("float32")
 
-        return [hit.payload["text"] for hit in points if hit.payload and "text" in hit.payload]
+        faiss.normalize_L2(q_emb)
 
-    def save(self, output_dir: str | Path) -> None:
-        print(f"[QdrantRetrieverIndex] Saving metadata to {output_dir}", flush=True)
-        output_path = Path(output_dir)
-        output_path.mkdir(parents=True, exist_ok=True)
+        D, I = self.index.search(q_emb, k)
 
-        with (output_path / "documents.json").open("w", encoding="utf-8") as f:
+        results = []
+        for row in I:
+            docs = [
+                self.documents[i]
+                for i in row
+                if 0 <= i < len(self.documents)
+            ]
+            results.append(docs)
+
+        return results
+
+    # --------------------------------------------------
+    # Save / load
+    # --------------------------------------------------
+    def save(self, path: str):
+
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+
+        faiss.write_index(self.index, str(path / "index.faiss"))
+
+        with open(path / "documents.json", "w") as f:
             json.dump(self.documents, f)
 
-    @classmethod
-    def load(
-        cls,
-        input_dir: str | Path,
-        encoder_name: str = "all-MiniLM-L6-v2",
-    ) -> "QdrantRetrieverIndex":
-        print(f"[QdrantRetrieverIndex] Loading metadata from {input_dir}", flush=True)
-        instance = cls(encoder_name=encoder_name)
+    def load(self, path: str):
 
-        with (Path(input_dir) / "documents.json").open("r", encoding="utf-8") as f:
-            instance.documents = json.load(f)
+        path = Path(path)
 
-        if instance.documents:
-            instance.build(instance.documents)
+        self.index = faiss.read_index(str(path / "index.faiss"))
 
-        return instance
+        with open(path / "documents.json", "r") as f:
+            self.documents = json.load(f)
+
+        self.dim = self.index.d

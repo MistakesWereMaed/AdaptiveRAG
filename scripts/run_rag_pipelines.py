@@ -1,6 +1,7 @@
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -12,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.data.preprocessing import extract_qa_records, load_records
 from src.llm import LocalLLM
 from src.pipeline import AdaptiveRAGPipeline
-from src.retriever import Retriever
+from src.retriever import FaissIVFRetriever
 from src.utils.config import load_yaml_config
 
 
@@ -59,6 +60,18 @@ def _require_index_dir(index_dir: str | None) -> Path:
     return index_path
 
 
+def _strategy_output_path(base_output: Path, strategy_name: str) -> Path:
+    return base_output.with_name(f"{base_output.stem}.{strategy_name}{base_output.suffix}")
+
+
+def _write_strategy_outputs(result: dict, base_output: Path) -> None:
+    base_output.parent.mkdir(parents=True, exist_ok=True)
+    for strategy_name, values in result.items():
+        strategy_path = _strategy_output_path(base_output, strategy_name)
+        with strategy_path.open("w", encoding="utf-8") as handle:
+            json.dump(values, handle, indent=2)
+
+
 def _run_shard(
     questions_path: str,
     strategy: str,
@@ -76,8 +89,8 @@ def _run_shard(
     local_questions = [question for _, question in sharded_questions]
 
     llm = LocalLLM(model_name=model_name)
-    retriever = Retriever(encoder_name=encoder_name)
-    retriever.load_index(_require_index_dir(index_dir))
+    retriever = FaissIVFRetriever(encoder_name=encoder_name)
+    retriever.load(_require_index_dir(index_dir))
 
     pipeline = AdaptiveRAGPipeline(llm, retriever)
 
@@ -210,25 +223,31 @@ def main():
         raise ValueError("A questions path must be provided via --questions or the config file")
     _require_index_dir(index_dir)
 
-    # Launcher mode: spawn local workers with plain python and merge shard files.
-    if args.worker_rank is None and args.num_procs > 1:
-        _launch_workers(
-            args=args,
-            questions_path=questions_path,
-            output_path=output_path,
-            strategy=strategy,
-            index_dir=index_dir,
-            encoder_name=encoder_name,
-            model_name=model_name,
-            shard_dir=shard_dir,
-        )
-        return
+    should_cleanup_shards = args.worker_rank is None
 
-    # Single-process mode or worker mode.
-    rank = 0 if args.worker_rank is None else args.worker_rank
-    world_size = 1 if args.worker_rank is None else args.world_size
+    try:
+        # Launcher mode: spawn local workers with plain python and merge shard files.
+        if args.worker_rank is None and args.num_procs > 1:
+            _launch_workers(
+                args=args,
+                questions_path=questions_path,
+                output_path=output_path,
+                strategy=strategy,
+                index_dir=index_dir,
+                encoder_name=encoder_name,
+                model_name=model_name,
+                shard_dir=shard_dir,
+            )
+            merged_payload_path = output_path
+            with merged_payload_path.open("r", encoding="utf-8") as handle:
+                merged_payload = json.load(handle)
+            _write_strategy_outputs(merged_payload, output_path)
+            return
 
-    if args.worker_rank is None:
+        # Single-process mode or worker mode.
+        rank = 0 if args.worker_rank is None else args.worker_rank
+        world_size = 1 if args.worker_rank is None else args.world_size
+
         _run_shard(
             questions_path=questions_path,
             strategy=strategy,
@@ -240,25 +259,15 @@ def main():
             world_size=world_size,
             shard_dir=shard_dir,
         )
-        shard_file = shard_dir / f"{output_path.stem}.rank0.json"
-        with shard_file.open("r", encoding="utf-8") as handle:
-            payload = json.load(handle)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with output_path.open("w", encoding="utf-8") as handle:
-            json.dump(payload["result"], handle, indent=2)
-        return
 
-    _run_shard(
-        questions_path=questions_path,
-        strategy=strategy,
-        output_path=output_path,
-        index_dir=index_dir,
-        encoder_name=encoder_name,
-        model_name=model_name,
-        rank=rank,
-        world_size=world_size,
-        shard_dir=shard_dir,
-    )
+        if args.worker_rank is None:
+            shard_file = shard_dir / f"{output_path.stem}.rank0.json"
+            with shard_file.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            _write_strategy_outputs(payload["result"], output_path)
+    finally:
+        if should_cleanup_shards:
+            shutil.rmtree(shard_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

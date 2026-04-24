@@ -14,29 +14,29 @@ class AdaptiveRAGPipeline:
         return self.llm.answer(questions)
 
     # --------------------------------------------------
-    # Strategy 1: Single-step RAG (Qdrant)
+    # Strategy 1: Single-step
     # --------------------------------------------------
     def single_step(self, questions: List[str], k: int = 5) -> List[str]:
-        contexts = []
+        print("Retrieving contexts (batched)...", flush=True)
 
-        for q in tqdm(questions, desc="Retrieving", unit="query"):
-            docs = self.retriever.retrieve(q, k=k)
-            context = "\n".join(docs)
-            contexts.append(context)
+        batch_docs = self.retriever.retrieve(questions, k=k)
 
+        contexts = [
+            "\n".join(docs)
+            for docs in batch_docs
+        ]
+
+        print("Generating answers...", flush=True)
         return self.llm.answer(questions, contexts)
 
     # --------------------------------------------------
-    # Strategy 2: Multi-step RAG (Qdrant)
+    # Strategy 2: Multi-step
     # --------------------------------------------------
     def multi_step(self, questions: List[str], steps: int = 2, k: int = 3) -> List[str]:
         all_contexts = [[] for _ in questions]
 
         for step in tqdm(range(steps), desc="Multi-step retrieval", unit="step"):
 
-            # -----------------------------------------
-            # Build queries (same logic as before)
-            # -----------------------------------------
             if step == 0:
                 queries = questions
             else:
@@ -45,34 +45,24 @@ class AdaptiveRAGPipeline:
                     for i, q in enumerate(questions)
                 ]
 
-            # -----------------------------------------
-            # Qdrant retrieval (batch loop but simple API)
-            # -----------------------------------------
-            batch_docs = [
-                self.retriever.retrieve(q, k=k)
-                for q in queries
-            ]
+            batch_docs = self.retriever.retrieve(queries, k=k)
 
-            # -----------------------------------------
-            # Accumulate contexts
-            # -----------------------------------------
             for i, docs in enumerate(batch_docs):
                 all_contexts[i].extend(docs)
 
         final_contexts = [
-            "\n".join(ctx) for ctx in all_contexts
+            "\n".join(ctx)
+            for ctx in all_contexts
         ]
 
         return self.llm.answer(questions, final_contexts)
 
     # --------------------------------------------------
-    # Run all strategies (for labeling)
+    # Run all strategies
     # --------------------------------------------------
     def run_all(self, questions: List[str]) -> Dict[str, List[str]]:
-        outputs = {}
-
-        outputs["no"] = self.no_retrieval(questions)
-        outputs["single"] = self.single_step(questions)
-        outputs["multi"] = self.multi_step(questions)
-
-        return outputs
+        return {
+            "no": self.no_retrieval(questions),
+            "single": self.single_step(questions),
+            "multi": self.multi_step(questions),
+        }

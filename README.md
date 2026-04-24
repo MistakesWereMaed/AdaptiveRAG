@@ -129,13 +129,13 @@ This section describes what each script does and where it fits in the workflow.
 ### 1) Prepare HotpotQA data
 
 ```bash
-python scripts/prepare_hotpotqa.py --output-dir data/hotpotqa --build-corpus
+python -m scripts.prepare_hotpotqa --output-dir data/hotpotqa --build-corpus
 ```
 
 ### 2) Build retrieval index (one-time, reusable)
 
 ```bash
-python scripts/build_index.py --config configs/retriever.yaml --corpus data/hotpotqa/corpus.jsonl --output-dir outputs/index
+python -m scripts.build_index --config configs/retriever.yaml --corpus data/hotpotqa/corpus.jsonl --output-dir outputs/index
 ```
 
 ### 3) Run RAG pipelines to produce predictions
@@ -143,28 +143,27 @@ python scripts/build_index.py --config configs/retriever.yaml --corpus data/hotp
 Single-GPU / single-process:
 
 ```bash
-python scripts/run_rag_pipelines.py --config configs/train.yaml --questions data/hotpotqa/train.jsonl --index-dir outputs/index --output outputs/predictions.json
+python -m scripts.run_rag_pipelines --config configs/train.yaml --questions data/hotpotqa/train.jsonl --index-dir outputs/index --output outputs/predictions.json
 ```
 
 Multi-GPU with python dataset sharding:
 
 ```bash
-python scripts/run_rag_pipelines.py --config configs/train.yaml --questions data/hotpotqa/train.jsonl --index-dir outputs/index --output outputs/predictions.json --num-procs 4
+python -m scripts.run_rag_pipelines --config configs/train.yaml --questions data/hotpotqa/train.jsonl --index-dir outputs/index --output outputs/predictions.json --num-procs 4
 ```
 
 Index reuse behavior:
 
-- `scripts/run_rag_pipelines.py` no longer auto-builds an index.
 - `--index-dir` is required and must contain `documents.json`.
 - If the index is missing, the script exits with a clear error.
-- Build (or rebuild) the index first with `scripts/build_index.py`.
+- Build (or rebuild) the index first with `python -m scripts.build_index`.
 
 ### 4) Generate weak labels (required before classifier training)
 
 Label generation uses all three RAG strategies and scores each result against the ground truth answer.
 
 ```bash
-python scripts/generate_labels.py --config configs/train.yaml --dataset data/hotpotqa/train.jsonl --predictions outputs/predictions.json --output outputs/labeled_train.json
+python -m scripts.generate_labels --config configs/train.yaml --dataset data/hotpotqa/train.jsonl --predictions outputs/predictions.json --output outputs/labeled_train.json
 ```
 
 ### 5) Train router classifier
@@ -172,17 +171,17 @@ python scripts/generate_labels.py --config configs/train.yaml --dataset data/hot
 Single-GPU / single-process:
 
 ```bash
-python scripts/train_classifier.py --config configs/train.yaml --train-data outputs/labeled_train.json --val-data data/hotpotqa/validation.jsonl
+python -m scripts.train_classifier --config configs/train.yaml --train-data outputs/labeled_train.json --val-data data/hotpotqa/validation.jsonl
 ```
 
 Multi-GPU with torchrun (DDP):
 
 ```bash
-torchrun --standalone --nproc_per_node=4 scripts/train_classifier.py --config configs/train.yaml --train-data outputs/labeled_train.json --val-data data/hotpotqa/validation.jsonl --strategy ddp
+torchrun --standalone --nproc_per_node=4 -m scripts.train_classifier --config configs/train.yaml --train-data outputs/labeled_train.json --val-data data/hotpotqa/validation.jsonl --strategy ddp
 ```
 
 ### 6) Evaluate predictions
 
 ```bash
-python scripts/evaluate.py --config configs/train.yaml --predictions outputs/predictions.json --references data/hotpotqa/validation.jsonl
+python -m scripts.evaluate --config configs/train.yaml --predictions outputs/predictions.json --references data/hotpotqa/validation.jsonl
 ```

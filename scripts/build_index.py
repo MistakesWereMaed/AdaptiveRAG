@@ -5,13 +5,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.data.preprocessing import extract_documents, load_records
-from src.retriever import QdrantRetrieverIndex
+from src.retriever import FaissIVFRetriever
 from src.utils.config import load_yaml_config
 
 
 def main():
 	print("[build_index] Starting index build", flush=True)
-	parser = argparse.ArgumentParser(description="Build a Qdrant retrieval index from a corpus")
+	parser = argparse.ArgumentParser(description="Build a FAISS retrieval index from a corpus")
 	parser.add_argument("--config", default="configs/retriever.yaml", help="Path to retriever config")
 	parser.add_argument("--corpus", default=None, help="Path to a JSON or JSONL corpus")
 	parser.add_argument("--output-dir", default=None, help="Directory for saved retriever metadata")
@@ -31,7 +31,7 @@ def main():
 	documents = extract_documents(records)
 	print(f"[build_index] Building index for {len(documents)} documents", flush=True)
 
-	index = QdrantRetrieverIndex(encoder_name=encoder_name)
+	index = FaissIVFRetriever(encoder_name=encoder_name)
 	index.build(documents)
 	index.save(output_dir)
 	print(f"[build_index] Finished writing index metadata to {output_dir}", flush=True)
