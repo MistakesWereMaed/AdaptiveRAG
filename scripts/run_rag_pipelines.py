@@ -72,6 +72,13 @@ def _write_strategy_outputs(result: dict, base_output: Path) -> None:
             json.dump(values, handle, indent=2)
 
 
+def _quiet_nonzero_rank(rank: int | None) -> None:
+    if rank is not None and rank != 0:
+        devnull = open(os.devnull, "w")
+        sys.stdout = devnull
+        sys.stderr = devnull
+
+
 def _run_shard(
     questions_path: str,
     strategy: str,
@@ -209,6 +216,8 @@ def main():
     parser.add_argument("--world-size", type=int, default=1, help=argparse.SUPPRESS)
     parser.add_argument("--shard-dir", default=None, help="Directory for temporary shard outputs")
     args = parser.parse_args()
+
+    _quiet_nonzero_rank(args.worker_rank)
 
     config = load_yaml_config(args.config)
     questions_path = args.questions or config.get("questions")

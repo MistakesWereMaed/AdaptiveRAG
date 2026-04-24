@@ -1,9 +1,10 @@
 model_name: mistralai/Mistral-7B-v0.1
 device: cuda
 load_in_4bit: true
-max_input_length: 4096
+max_input_length: 2048
 max_new_tokens: 32
-batch_size: 256
+batch_size: 128
+min_batch_size_on_oom: 8
 use_cache: true
 compile_model: true
 

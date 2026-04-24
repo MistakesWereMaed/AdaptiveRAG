@@ -49,6 +49,7 @@ class LocalLLM:
         self.default_max_new_tokens = int(config.get("max_new_tokens", 32))
         self.default_batch_size = int(config.get("batch_size", 128))
         self.default_use_cache = bool(config.get("use_cache", True))
+        self.min_batch_size_on_oom = int(config.get("min_batch_size_on_oom", 8))
 
         bnb_4bit_compute_dtype = str(config.get("bnb_4bit_compute_dtype", "float16"))
         compute_dtype = getattr(torch, bnb_4bit_compute_dtype, torch.float16)
@@ -163,51 +164,83 @@ class LocalLLM:
 
         # ---- batching ----
         prompts = sorted(prompts, key=len)
-        batch_starts = range(0, len(prompts), batch_size)
-        for i in tqdm(batch_starts, desc="Generating", unit="batch"):
-            batch_prompts = prompts[i : i + batch_size]
+        cursor = 0
+        progress = tqdm(total=len(prompts), desc="Generating", unit="prompt")
+        while cursor < len(prompts):
+            current_batch_size = min(batch_size, len(prompts) - cursor)
 
-            uncached_prompts = []
-            uncached_indices = []
-            batch_outputs = [None] * len(batch_prompts)
+            while True:
+                batch_prompts = prompts[cursor : cursor + current_batch_size]
 
-            # ---- check cache ----
-            for j, p in enumerate(batch_prompts):
-                if use_cache:
-                    cached = self._get_cached(p)
-                    if cached is not None:
-                        batch_outputs[j] = cached
-                        continue
+                uncached_prompts = []
+                uncached_indices = []
+                batch_outputs = [None] * len(batch_prompts)
 
-                uncached_prompts.append(p)
-                uncached_indices.append(j)
-
-            # ---- run model on uncached ----
-            if uncached_prompts:
-                inputs = self.tokenizer(
-                    uncached_prompts,
-                    return_tensors="pt",
-                    padding=True,
-                    truncation=True,
-                    max_length=self.max_input_length,
-                ).to(self.model.device)
-
-                outputs = self.model.generate(
-                    **inputs,
-                    max_new_tokens=max_new_tokens,
-                    eos_token_id=self.tokenizer.eos_token_id,
-                    pad_token_id=self.tokenizer.eos_token_id,
-                )
-
-                decoded = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)
-
-                # ---- store outputs ----
-                for idx, text in zip(uncached_indices, decoded):
-                    batch_outputs[idx] = text
+                # ---- check cache ----
+                for j, p in enumerate(batch_prompts):
                     if use_cache:
-                        self._set_cache(batch_prompts[idx], text)
+                        cached = self._get_cached(p)
+                        if cached is not None:
+                            batch_outputs[j] = cached
+                            continue
 
-            results.extend(batch_outputs)
+                    uncached_prompts.append(p)
+                    uncached_indices.append(j)
+
+                try:
+                    # ---- run model on uncached ----
+                    if uncached_prompts:
+                        inputs = self.tokenizer(
+                            uncached_prompts,
+                            return_tensors="pt",
+                            padding=True,
+                            truncation=True,
+                            max_length=self.max_input_length,
+                        ).to(self.model.device)
+
+                        outputs = self.model.generate(
+                            **inputs,
+                            max_new_tokens=max_new_tokens,
+                            eos_token_id=self.tokenizer.eos_token_id,
+                            pad_token_id=self.tokenizer.eos_token_id,
+                            do_sample=False,
+                        )
+
+                        decoded = self.tokenizer.batch_decode(outputs, skip_special_tokens=True)
+
+                        # ---- store outputs ----
+                        for idx, text in zip(uncached_indices, decoded):
+                            batch_outputs[idx] = text
+                            if use_cache:
+                                self._set_cache(batch_prompts[idx], text)
+
+                    results.extend(batch_outputs)
+                    cursor += current_batch_size
+                    progress.update(current_batch_size)
+                    break
+                except RuntimeError as error:
+                    error_text = str(error).lower()
+                    is_oom = "out of memory" in error_text or "cuda error: out of memory" in error_text
+                    if not is_oom:
+                        raise
+
+                    if current_batch_size <= self.min_batch_size_on_oom:
+                        raise RuntimeError(
+                            "Generation OOM even at reduced batch size. "
+                            f"Current batch size={current_batch_size}. "
+                            "Lower max_input_length or max_new_tokens, or use a smaller model."
+                        ) from error
+
+                    new_batch_size = max(self.min_batch_size_on_oom, current_batch_size // 2)
+                    print(
+                        f"[LocalLLM] OOM at batch_size={current_batch_size}; retrying with {new_batch_size}",
+                        flush=True,
+                    )
+                    current_batch_size = new_batch_size
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+
+        progress.close()
 
         return results
 
