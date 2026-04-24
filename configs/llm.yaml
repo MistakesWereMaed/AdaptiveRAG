@@ -1,0 +1,14 @@
+model_name: mistralai/Mistral-7B-v0.1
+device: cuda
+load_in_4bit: true
+max_input_length: 4096
+max_new_tokens: 32
+batch_size: 256
+use_cache: true
+compile_model: true
+
+# Quantization/runtime details
+bnb_4bit_compute_dtype: float16
+bnb_4bit_use_double_quant: true
+bnb_4bit_quant_type: nf4
+device_map: auto

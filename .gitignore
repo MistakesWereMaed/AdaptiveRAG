@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# Build and packaging
+build/
+dist/
+*.egg-info/
+
+# Notebook checkpoints
+.ipynb_checkpoints/
+
+# Local environment and secrets
+.env
+.env.*
+
+# Model and experiment artifacts
+outputs/
+wandb/
+data/hotpotqa/
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.safetensors
+
+# Retrieval and cache files
+cache.json
+*.faiss
+*.index
+
+# OS files
+.DS_Store
+Thumbs.db

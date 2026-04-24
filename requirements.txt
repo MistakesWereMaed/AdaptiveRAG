@@ -1,0 +1,10 @@
+faiss-gpu
+datasets
+numpy
+pytorch-lightning
+pyyaml
+sentence-transformers
+torch
+tqdm
+transformers
+wandb
