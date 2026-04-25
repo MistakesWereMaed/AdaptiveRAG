@@ -4,7 +4,7 @@ from transformers import AutoModel
 
 
 class RouterClassifier(nn.Module):
-	def __init__(self, model_name: str = "bert-base-uncased", num_classes: int = 3, dropout: float = 0.1):
+	def __init__(self, model_name: str, num_classes: int = 3, dropout: float = 0.1):
 		super().__init__()
 		print(f"[RouterClassifier] Loading encoder={model_name} num_classes={num_classes}", flush=True)
 		self.encoder = AutoModel.from_pretrained(model_name)

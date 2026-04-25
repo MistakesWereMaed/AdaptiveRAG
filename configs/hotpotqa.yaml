@@ -1,0 +1,3 @@
+output_dir: data/hotpotqa
+config_name: distractor
+build_corpus: true

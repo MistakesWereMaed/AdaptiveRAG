@@ -1,7 +1,6 @@
 import argparse
-import sys
 import os
-
+import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -13,39 +12,28 @@ from pytorch_lightning.loggers import WandbLogger
 from src.classifier.datamodule import RouterDataModule
 from src.classifier.lightning_module import RouterLightningModule
 from src.utils.config import load_yaml_config
-from src.utils.distributed import get_rank, get_world_size, is_distributed, is_main_process
+from src.utils.distributed import is_distributed, is_main_process
 
 
 def main():
     print("[train_classifier] Starting trainer setup", flush=True)
     parser = argparse.ArgumentParser(description="Train the router classifier")
     parser.add_argument("--config", default="configs/train.yaml", help="Path to training config")
-    parser.add_argument("--train-data", default=None, help="Path to labeled training data")
-    parser.add_argument("--val-data", default=None, help="Optional validation data")
-    parser.add_argument("--model-name", default=None)
-    parser.add_argument("--batch-size", type=int, default=None)
-    parser.add_argument("--max-epochs", type=int, default=None)
-    parser.add_argument("--learning-rate", type=float, default=None)
-    parser.add_argument("--strategy", default=None, help="Lightning strategy (e.g. ddp)")
-    parser.add_argument("--devices", default=None, help="Lightning devices value")
-    parser.add_argument("--num-nodes", type=int, default=None)
-    parser.add_argument("--precision", default=None)
-    parser.add_argument("--accelerator", default=None)
-    parser.add_argument("--use-wandb", action="store_true")
     args = parser.parse_args()
 
     config = load_yaml_config(args.config)
-    train_data = args.train_data or config.get("train_data")
-    model_name = args.model_name or config.get("model_name", "bert-base-uncased")
-    batch_size = args.batch_size or int(config.get("batch_size", 8))
-    max_epochs = args.max_epochs or int(config.get("max_epochs", 3))
-    learning_rate = args.learning_rate or float(config.get("learning_rate", 2e-5))
-    use_wandb = args.use_wandb or bool(config.get("use_wandb", False))
-    configured_strategy = args.strategy or config.get("strategy", "auto")
-    configured_devices = args.devices or config.get("devices", "auto")
-    num_nodes = args.num_nodes or int(config.get("num_nodes", 1))
-    precision = args.precision or config.get("precision", "32-true")
-    accelerator = args.accelerator or config.get("accelerator", "auto")
+    train_data = str(config["train_data"])
+    model_name = str(config["model_name"])
+    batch_size = int(config["batch_size"])
+    max_epochs = int(config["max_epochs"])
+    learning_rate = float(config["learning_rate"])
+    use_wandb = bool(config["use_wandb"])
+    configured_strategy = config["strategy"]
+    configured_devices = config["devices"]
+    num_nodes = int(config["num_nodes"])
+    precision = config["precision"]
+    accelerator = config["accelerator"]
+    val_data = config.get("val_data")
 
     torchrun_mode = is_distributed()
     if torchrun_mode:
@@ -56,13 +44,10 @@ def main():
     if isinstance(configured_devices, str) and configured_devices.isdigit():
         configured_devices = int(configured_devices)
 
-    if train_data is None:
-        raise ValueError("A train-data path must be provided via --train-data or the config file")
-
     print(f"[train_classifier] Loading data from {train_data}", flush=True)
     datamodule = RouterDataModule(
         train_data=train_data,
-        val_data=args.val_data,
+        val_data=val_data,
         model_name=model_name,
         batch_size=batch_size,
     )

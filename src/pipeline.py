@@ -17,7 +17,7 @@ class AdaptiveRAGPipeline:
     # Strategy 1: Single-step
     # --------------------------------------------------
     def single_step(self, questions: List[str], k: int = 5) -> List[str]:
-        print("Retrieving contexts (batched)...", flush=True)
+        print("Retrieving contexts...", flush=True)
 
         batch_docs = self.retriever.retrieve(questions, k=k)
 
@@ -26,7 +26,6 @@ class AdaptiveRAGPipeline:
             for docs in batch_docs
         ]
 
-        print("Generating answers...", flush=True)
         return self.llm.answer(questions, contexts)
 
     # --------------------------------------------------
@@ -56,13 +55,3 @@ class AdaptiveRAGPipeline:
         ]
 
         return self.llm.answer(questions, final_contexts)
-
-    # --------------------------------------------------
-    # Run all strategies
-    # --------------------------------------------------
-    def run_all(self, questions: List[str]) -> Dict[str, List[str]]:
-        return {
-            "no": self.no_retrieval(questions),
-            "single": self.single_step(questions),
-            "multi": self.multi_step(questions),
-        }

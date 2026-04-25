@@ -38,7 +38,7 @@ def _load_predictions(path: str | Path) -> Dict[str, list]:
     if missing:
         raise ValueError(
             f"Predictions file is missing required strategy outputs: {sorted(missing)}. "
-            "Run run_rag_pipelines.py with --strategy all."
+            "Run run_rag_pipelines.py with strategy=all."
         )
 
     for key in required_keys:
@@ -51,23 +51,14 @@ def _load_predictions(path: str | Path) -> Dict[str, list]:
 def main():
     print("[generate_labels] Starting label generation", flush=True)
     parser = argparse.ArgumentParser(description="Generate weak labels for Adaptive-RAG routing")
-    parser.add_argument("--config", default="configs/train.yaml", help="Path to runtime config")
-    parser.add_argument("--dataset", default=None, help="Path to QA dataset JSON/JSONL")
-    parser.add_argument("--predictions", default=None, help="Path to predictions JSON from run_rag_pipelines.py")
-    parser.add_argument("--output", default=None, help="Path to output labeled JSON file")
-    parser.add_argument("--batch-size", type=int, default=None, help="Batch size for score aggregation")
+    parser.add_argument("--config", default="configs/labels.yaml", help="Path to label-generation config")
     args = parser.parse_args()
 
     config = load_yaml_config(args.config)
-    dataset_path = args.dataset or config.get("train_data")
-    predictions_path = args.predictions or config.get("output", "outputs/predictions.json")
-    output_path = Path(args.output or config.get("labels_output", "outputs/labeled_train.json"))
-    batch_size = args.batch_size or int(config.get("batch_size", 8))
-
-    if dataset_path is None:
-        raise ValueError("A dataset path must be provided via --dataset or config train_data")
-    if predictions_path is None:
-        raise ValueError("A predictions path must be provided via --predictions or config output")
+    dataset_path = str(config["dataset"])
+    predictions_path = str(config["predictions"])
+    output_path = Path(config["output"])
+    batch_size = int(config["batch_size"])
 
     dataset = extract_qa_records(load_records(dataset_path))
     outputs = _load_predictions(predictions_path)

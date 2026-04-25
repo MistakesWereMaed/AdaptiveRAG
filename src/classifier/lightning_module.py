@@ -9,7 +9,7 @@ from .model import RouterClassifier
 
 
 class RouterLightningModule(pl.LightningModule):
-    def __init__(self, model_name: str = "bert-base-uncased", num_classes: int = 3, learning_rate: float = 2e-5):
+    def __init__(self, model_name: str, num_classes: int = 3, learning_rate: float = 2e-5):
         super().__init__()
         print(f"[RouterLightningModule] Initializing model={model_name} lr={learning_rate}", flush=True)
         self.save_hyperparameters()

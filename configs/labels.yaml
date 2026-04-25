@@ -1,0 +1,4 @@
+dataset: data/hotpotqa/train.jsonl
+predictions: outputs/predictions.json
+output: outputs/labeled_train.json
+batch_size: 8

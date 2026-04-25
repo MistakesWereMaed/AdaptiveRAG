@@ -1,0 +1,7 @@
+questions: data/hotpotqa/train.jsonl
+output: outputs/predictions.json
+strategy: single
+index_dir: outputs/index
+num_procs: 1
+llm_config: configs/llm.yaml
+retriever_config: configs/retriever.yaml

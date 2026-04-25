@@ -22,7 +22,7 @@ The system will:
 
 1. **LLM (Inference Engine)**
 
-   * Local deployment (Mistral 7B)
+   * Local deployment (Meta-Llama-3-8B-Instruct)
    * Used across all strategies
 
 2. **Retriever**
@@ -420,7 +420,7 @@ Strong:
 
 ## 17. Immediate Next Steps
 
-1. Verify Mistral 7B inference stability on HPC
+1. Verify Meta-Llama-3-8B-Instruct inference stability on HPC
 2. Implement retriever + index
 3. Run small-scale pipeline (≤100 samples)
 4. Validate outputs before scaling

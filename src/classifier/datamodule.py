@@ -26,7 +26,7 @@ class RouterDataset(Dataset):
 
 
 class RouterDataModule(pl.LightningDataModule):
-	def __init__(self, train_data, val_data=None, model_name: str = "bert-base-uncased", batch_size: int = 8, max_length: int = 256, num_workers: int = 0):
+	def __init__(self, train_data, model_name: str, val_data=None, batch_size: int = 8, max_length: int = 256, num_workers: int = 0):
 		super().__init__()
 		print(f"[RouterDataModule] Initializing model={model_name} batch_size={batch_size}", flush=True)
 		self.train_data = train_data
