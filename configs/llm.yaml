@@ -1,9 +1,11 @@
 model_name: Qwen/Qwen2.5-7B-Instruct
 tensor_parallel_size: 1
 max_model_len: 2048
-gpu_memory_utilization: 0.9
+gpu_memory_utilization: 0.8
 dtype: float16
 trust_remote_code: false
+max_num_seqs: 64
+max_tokens: 32
 
 # Sampling defaults
 max_new_tokens: 32

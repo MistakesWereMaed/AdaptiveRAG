@@ -1,6 +1,6 @@
 questions: data/hotpotqa/train.jsonl
 output: outputs/predictions.json
-strategy: single
+strategy: multi
 index_dir: outputs/index
 num_procs: 1
 llm_config: configs/llm.yaml

@@ -137,7 +137,7 @@ class LocalLLM:
         self,
         questions: Union[str, List[str]],
         contexts: Optional[Union[str, List[str]]] = None,
-        normalize: bool = True,
+        normalize: bool = False,
         **kwargs,
     ) -> List[str]:
 
