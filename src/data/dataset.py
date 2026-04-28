@@ -4,7 +4,8 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 
 from torch.utils.data import Dataset
 
-from .preprocessing import extract_qa_records, load_records
+from .file_loader import load_records
+from src.data.schemas import QAItem
 
 
 @dataclass
@@ -16,23 +17,28 @@ class QAExample:
 
 
 class QADataset(Dataset):
-	def __init__(self, source: Union[str, Path, Sequence[Dict[str, Any]]]):
+	def __init__(self, source: Union[str, Path, Sequence[Union[Dict[str, Any], QAItem]]]):
 		if isinstance(source, (str, Path)):
 			records = load_records(source)
 		else:
 			records = list(source)
 
 		self.examples: List[QAExample] = []
-		for record in extract_qa_records(records):
-			label = record.get("label")
-			self.examples.append(
-				QAExample(
-					question=record["question"],
-					answer=record["answer"],
-					label=label if isinstance(label, int) else None,
-					metadata={key: value for key, value in record.items() if key not in {"question", "answer", "label"}},
-				)
-			)
+		for record in records:
+			if isinstance(record, QAItem):
+				question = record.question
+				answer = record.gold
+				label = None
+				metadata = None
+			elif isinstance(record, dict):
+				question = record.get("question") or record.get("query")
+				answer = record.get("answer")
+				label = record.get("label") if isinstance(record.get("label"), int) else None
+				metadata = {key: value for key, value in record.items() if key not in {"question", "answer", "label"}}
+			else:
+				continue
+
+			self.examples.append(QAExample(question=question, answer=answer, label=label, metadata=metadata))
 
 	def __len__(self) -> int:
 		return len(self.examples)

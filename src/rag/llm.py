@@ -1,7 +1,6 @@
 from typing import Any, List, Optional, Union
-import re
-
 from vllm import LLM, SamplingParams
+from src.rag.trace import ExecutionTrace
 
 
 class LocalLLM:
@@ -56,37 +55,6 @@ class LocalLLM:
                 "Answer:"
             )
 
-    # --------------------------------------------------
-    # Normalization (NEW)
-    # --------------------------------------------------
-    def _normalize_answer(self, text: str) -> str:
-        text = text.lower()
-
-        # remove punctuation
-        text = re.sub(r"[^\w\s]", "", text)
-
-        # remove articles
-        text = re.sub(r"\b(a|an|the)\b", " ", text)
-
-        # collapse whitespace
-        text = " ".join(text.split())
-
-        return text
-
-    def _clean_prediction(self, text: str) -> str:
-        text = text.strip()
-
-        # take first line only
-        text = text.split("\n")[0].strip()
-
-        # remove trailing punctuation
-        text = text.rstrip(".,;: ")
-
-        return text
-
-    def _postprocess(self, text: str) -> str:
-        text = self._clean_prediction(text)
-        return text
 
     # --------------------------------------------------
     # Generation
@@ -97,10 +65,21 @@ class LocalLLM:
         max_new_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
         top_p: Optional[float] = None,
+        trace: Optional[Union[ExecutionTrace, List[ExecutionTrace]]] = None,
     ) -> List[str]:
 
         if isinstance(prompts, str):
             prompts = [prompts]
+
+        # Record LLM call in trace(s) (before execution)
+        if trace is not None:
+            # support single trace or list of traces
+            if isinstance(trace, list):
+                for t in trace:
+                    if t is not None:
+                        t.record_llm_call(1)
+            else:
+                trace.record_llm_call(1)
 
         max_new_tokens = max_new_tokens if max_new_tokens is not None else self.default_max_new_tokens
         temperature = temperature if temperature is not None else self.default_temperature
@@ -116,15 +95,13 @@ class LocalLLM:
         outputs = self.llm.generate(
             prompts,
             sampling_params=sampling_params,
-            use_tqdm=True,
+            use_tqdm=self.default_use_tqdm,
         )
 
         results: List[str] = []
         for output in outputs:
             if output.outputs:
-                raw = output.outputs[0].text
-                cleaned = self._postprocess(raw)
-                results.append(cleaned)
+                results.append(output.outputs[0].text)
             else:
                 results.append("")
 
@@ -137,7 +114,7 @@ class LocalLLM:
         self,
         questions: Union[str, List[str]],
         contexts: Optional[Union[str, List[str]]] = None,
-        normalize: bool = False,
+        trace: Optional[ExecutionTrace] = None,
         **kwargs,
     ) -> List[str]:
 
@@ -154,10 +131,6 @@ class LocalLLM:
             for question, context in zip(questions, contexts)
         ]
 
-        outputs = self.generate(prompts, **kwargs)
-
-        # optional normalization for evaluation
-        if normalize:
-            outputs = [self._normalize_answer(o) for o in outputs]
+        outputs = self.generate(prompts, trace=trace, **kwargs)
 
         return outputs

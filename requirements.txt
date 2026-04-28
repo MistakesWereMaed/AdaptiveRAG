@@ -1,4 +1,6 @@
-qdrant-client
+wandb
+vllm
+faiss-cpu
 datasets
 numpy
 pytorch-lightning
@@ -7,5 +9,4 @@ sentence-transformers
 torch
 tqdm
 transformers
-wandb
-vllm
+pydantic

@@ -6,13 +6,23 @@ import torch
 from torch.utils.data import DataLoader, Dataset, random_split
 from transformers import AutoTokenizer
 
-from src.data.preprocessing import extract_qa_records, load_records
+from src.data.file_loader import load_records
+from src.data.schemas import QAItem
 
 
 class RouterDataset(Dataset):
-	def __init__(self, records: Sequence[Dict[str, object]]):
+	def __init__(self, records: Sequence[Union[Dict[str, object], QAItem]]):
 		print(f"[RouterDataset] Building dataset from {len(records)} records", flush=True)
-		self.records = [record for record in records if isinstance(record.get("question"), str) and record.get("label") is not None]
+		cleaned = []
+		for record in records:
+			if isinstance(record, QAItem):
+				if record is not None:
+					# QAItem does not contain label by default; expect dicts for labeled data
+					continue
+			elif isinstance(record, dict):
+				if isinstance(record.get("question"), str) and record.get("label") is not None:
+					cleaned.append(record)
+		self.records = cleaned
 
 	def __len__(self) -> int:
 		return len(self.records)
@@ -45,7 +55,8 @@ class RouterDataModule(pl.LightningDataModule):
 			records = load_records(source)
 		else:
 			records = list(source)
-		return extract_qa_records(records)
+		# Router expects labeled dict records; if QAItem objects are provided, caller should convert externally
+		return records
 
 	def setup(self, stage: Optional[str] = None):
 		print(f"[RouterDataModule] Setup stage={stage}", flush=True)

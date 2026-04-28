@@ -2,7 +2,7 @@ from typing import Any
 
 import torch
 
-from pipeline import AdaptiveRAGPipeline
+from src.rag.pipeline import AdaptiveRAGPipeline
 
 
 def _to_int(strategy: Any) -> int:
@@ -13,7 +13,15 @@ def _to_int(strategy: Any) -> int:
     return int(strategy)
 
 
-def route(question, classifier, llm, retriever, k: int = 5, steps: int = 2):
+def route(
+    question,
+    classifier,
+    llm,
+    retriever,
+    single_k: int = 5,
+    multi_k: int = 3,
+    steps: int = 2,
+):
     print("[router] Routing a question", flush=True)
     if hasattr(classifier, "predict"):
         strategy = classifier.predict(question)
@@ -25,5 +33,5 @@ def route(question, classifier, llm, retriever, k: int = 5, steps: int = 2):
     if strategy_index == 0:
         return pipeline.no_retrieval([question])[0]
     if strategy_index == 1:
-        return pipeline.single_step([question], k=k)[0]
-    return pipeline.multi_step([question], steps=steps, k=max(1, k // 2))[0]
+        return pipeline.single_step([question], k=single_k)[0]
+    return pipeline.multi_step([question], steps=steps, k=multi_k)[0]

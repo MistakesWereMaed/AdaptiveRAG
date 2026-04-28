@@ -1,2 +1,0 @@
-predictions: outputs/predictions.json
-references: data/hotpotqa/validation.jsonl

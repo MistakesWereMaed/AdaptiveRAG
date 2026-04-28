@@ -87,6 +87,46 @@ Most utilities expect JSON or JSONL records with at least these fields:
 }
 ```
 
+Generated prediction files are keyed by `id` and contain model outputs separately from the source question:
+
+```json
+{
+  "id": 1,
+  "prediction": "...",
+  "gold": "...",
+  "strategy": "single",
+  "retrieval_count": 1,
+  "llm_calls": 1,
+  "latency_s": 0.42
+}
+```
+
+## Streaming Inference
+
+As of the latest refactor, inference is **streaming and instrumented**:
+
+- Results are written to disk incrementally (JSONL format) instead of accumulating in memory
+- Each record includes execution traces: retrieval count, LLM call count, latency
+- Metrics are aggregated per strategy and saved to `*_stats.json`
+- Memory usage no longer scales with dataset size
+- Results are safe for process interruption
+
+See [STREAMING_REFACTOR.md](STREAMING_REFACTOR.md) for detailed documentation.
+
+### Validation
+
+After inference, validate output correctness:
+
+```bash
+python scripts/validate_streaming.py data/hotpotqa/train.jsonl outputs
+```
+
+Checks:
+- JSONL format correctness
+- Metrics aggregation accuracy
+- Output completeness and consistency
+- Dataset ordering and ID alignment
+
 Retrieval corpora can use `text`, `content`, `passage`, or `document` fields. Plain text files with one document per line are also supported in the indexing script.
 
 ## Script Reference
@@ -131,44 +171,44 @@ This section describes what each script does and where it fits in the workflow.
 ### 1) Prepare HotpotQA data
 
 ```bash
-python -m scripts.prepare_hotpotqa --config configs/hotpotqa.yaml
+python -m scripts.prepare_hotpotqa
 ```
 
 ### 2) Build retrieval index (one-time, reusable)
 
 ```bash
-python -m scripts.build_index --config configs/retriever.yaml
+python -m scripts.build_index
 ```
 
 ### 3) Run RAG pipelines to produce predictions
 
 ```bash
-python -m scripts.generate_responses --config configs/pipeline.yaml
+python -m scripts.generate_responses
 ```
 
 Index reuse behavior:
 
 - `index_dir` in the pipeline config is required and must contain `documents.json`.
 - If the index is missing, the script exits with a clear error.
-- Build (or rebuild) the index first with `python -m scripts.build_index --config configs/retriever.yaml`.
+- Build (or rebuild) the index first with `python -m scripts.build_index`.
 
 ### 4) Generate weak labels (required before classifier training)
 
 Label generation uses all three RAG strategies and scores each result against the ground truth answer.
 
 ```bash
-python -m scripts.generate_labels --config configs/labels.yaml
+python -m scripts.generate_labels
 ```
 
 ### 5) Train router classifier
 
 
 ```bash
-python -m scripts.train_classifier --config configs/train.yaml
+python -m scripts.train_classifier
 ```
 
 ### 6) Evaluate predictions
 
 ```bash
-python -m scripts.evaluate --config configs/evaluate.yaml
+python -m scripts.evaluate
 ```

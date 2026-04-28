@@ -7,37 +7,57 @@ from tqdm.auto import tqdm
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.data.preprocessing import extract_qa_records, load_records, normalize_answer
-from src.utils.config import load_yaml_config
-from src.utils.eval import compute_f1
+from src.data.file_loader import load_records, load_single_predictions, normalize_text, load_yaml_config
 
 
 def exact_match(prediction: str, reference: str) -> float:
-    return float(normalize_answer(prediction) == normalize_answer(reference))
+    return float(normalize_text(prediction) == normalize_text(reference))
+
+
+def compute_f1(prediction: str, reference: str) -> float:
+    p = normalize_text(prediction).split()
+    r = normalize_text(reference).split()
+    if not p or not r:
+        return 0.0
+    common = set(p) & set(r)
+    num_same = sum(min(p.count(w), r.count(w)) for w in common)
+    if num_same == 0:
+        return 0.0
+    precision = num_same / len(p)
+    recall = num_same / len(r)
+    return 2 * precision * recall / (precision + recall)
 
 
 def main():
     print("[evaluate] Starting evaluation", flush=True)
     parser = argparse.ArgumentParser(description="Evaluate QA predictions")
-    parser.add_argument("--config", default="configs/evaluate.yaml", help="Path to evaluation config")
+    parser.add_argument("--config", default="config.yaml", help="Path to evaluation config")
     args = parser.parse_args()
 
-    config = load_yaml_config(args.config)
+    config = load_yaml_config(args.config, section="evaluate")
     predictions_path = str(config["predictions"])
     references_path = str(config["references"])
 
-    predictions = load_records(predictions_path)
-    references = extract_qa_records(load_records(references_path))
+    # references -> List[QAItem]
+    references = load_records(references_path)
+    # predictions -> List[PredictionItem]
+    predictions = load_single_predictions(predictions_path)
+
     print(f"[evaluate] Loaded {len(predictions)} predictions and {len(references)} references", flush=True)
 
-    if len(predictions) != len(references):
-        raise ValueError("Predictions and references must contain the same number of records")
+    refs_by_id = {r.id: r for r in references}
+    preds_by_id = {p.id: p for p in predictions}
+
+    if set(refs_by_id.keys()) != set(preds_by_id.keys()):
+        raise ValueError("Prediction ids and reference ids do not match")
 
     exact_match_scores = []
     f1_scores = []
-    for prediction, reference in tqdm(zip(predictions, references), total=len(predictions), desc="Evaluating", unit="example"):
-        pred_text = prediction.get("prediction") or prediction.get("answer") or ""
-        gold_text = reference["answer"]
+    for _id in tqdm(sorted(refs_by_id.keys()), desc="Evaluating", unit="example"):
+        reference = refs_by_id[_id]
+        prediction = preds_by_id[_id]
+        pred_text = prediction.prediction
+        gold_text = reference.gold
         exact_match_scores.append(exact_match(pred_text, gold_text))
         f1_scores.append(compute_f1(pred_text, gold_text))
 

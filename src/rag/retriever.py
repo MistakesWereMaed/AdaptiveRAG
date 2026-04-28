@@ -1,11 +1,12 @@
 import json
 from pathlib import Path
-from typing import List, Sequence
+from typing import List, Sequence, Optional, Union
 
 import numpy as np
 import faiss
 from sentence_transformers import SentenceTransformer
 from tqdm.auto import tqdm
+from src.rag.trace import ExecutionTrace
 
 
 class FaissIVFRetriever:
@@ -71,7 +72,16 @@ class FaissIVFRetriever:
     # --------------------------------------------------
     # Batch retrieval
     # --------------------------------------------------
-    def retrieve(self, queries: List[str], k: int = 5) -> List[List[str]]:
+    def retrieve(self, queries: List[str], k: int = 5, trace: Optional[Union[ExecutionTrace, List[ExecutionTrace]]] = None) -> List[List[str]]:
+
+        # Record retrieval in trace(s) (before execution)
+        if trace is not None:
+            if isinstance(trace, list):
+                for t in trace:
+                    if t is not None:
+                        t.record_retrieval(1)
+            else:
+                trace.record_retrieval(1)
 
         q_emb = self.encoder.encode(
             queries,

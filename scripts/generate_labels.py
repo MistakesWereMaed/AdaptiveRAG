@@ -8,97 +8,168 @@ from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.data.preprocessing import extract_qa_records, load_records
-from src.utils.config import load_yaml_config
-from src.utils.eval import compute_f1, normalize
+from src.data.file_loader import load_records, load_predictions
+from src.data.squad import evaluate_batch, mean
 
 
-STRATEGY_TO_LABEL = {"no": 0, "single": 1, "multi": 2}
-STRATEGY_PRIORITY = {"no": 0, "single": 1, "multi": 2}
+# ============================================================
+# Label mapping
+# ============================================================
+STRATEGY_TO_LABEL = {"no-rag": 0, "single": 1, "multi": 2}
+STRATEGY_PRIORITY = {"no-rag": 0, "single": 1, "multi": 2}
 
 
+# ============================================================
+# Utilities
+# ============================================================
 def _best_strategy(scores: Dict[str, float]) -> str:
-    return max(scores.items(), key=lambda item: (item[1], -STRATEGY_PRIORITY[item[0]]))[0]
+    return max(scores.items(), key=lambda x: (x[1], -STRATEGY_PRIORITY[x[0]]))[0]
 
 
-def exact_match(prediction: str, reference: str) -> float:
-    return float(normalize(prediction) == normalize(reference))
-
-
-def _load_predictions(path: str | Path) -> Dict[str, list]:
-    predictions_path = Path(path)
-    with predictions_path.open("r", encoding="utf-8") as handle:
-        payload = json.load(handle)
-
-    if not isinstance(payload, dict):
-        raise ValueError("Predictions file must be a JSON object with strategy keys: no/single/multi")
-
-    required_keys = {"no", "single", "multi"}
-    missing = required_keys - set(payload.keys())
-    if missing:
-        raise ValueError(
-            f"Predictions file is missing required strategy outputs: {sorted(missing)}. "
-            "Run run_rag_pipelines.py with strategy=all."
-        )
-
-    for key in required_keys:
-        if not isinstance(payload[key], list):
-            raise ValueError(f"Predictions for strategy '{key}' must be a list")
-
-    return payload
-
-
+# ============================================================
+# Main
+# ============================================================
 def main():
-    print("[generate_labels] Starting label generation", flush=True)
-    parser = argparse.ArgumentParser(description="Generate weak labels for Adaptive-RAG routing")
-    parser.add_argument("--config", default="configs/labels.yaml", help="Path to label-generation config")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", default="config.yaml")
     args = parser.parse_args()
 
-    config = load_yaml_config(args.config)
-    dataset_path = str(config["dataset"])
-    predictions_path = str(config["predictions"])
-    output_path = Path(config["output"])
-    batch_size = int(config["batch_size"])
+    cfg = __import__("yaml").safe_load(open(args.config))
+    cfg = cfg.get("labels", cfg)
 
-    dataset = extract_qa_records(load_records(dataset_path))
-    outputs = _load_predictions(predictions_path)
-    print(f"[generate_labels] Loaded {len(dataset)} examples and predictions from {predictions_path}", flush=True)
+    dataset = load_records(cfg["dataset"])
+    predictions = load_predictions(cfg["predictions"])
 
-    total_examples = len(dataset)
-    for strategy in ("no", "single", "multi"):
-        if len(outputs[strategy]) != total_examples:
-            raise ValueError(
-                f"Mismatch between dataset size ({total_examples}) and '{strategy}' predictions "
-                f"({len(outputs[strategy])}). Ensure predictions were generated from the same dataset."
-            )
+    batch_size = int(cfg["batch_size"])
+    output_path = Path(cfg["output"])
+    stats_path = output_path.with_suffix(".stats.json")
+
+    total = len(dataset)
+
+    # --------------------------------------------------------
+    # validation
+    # --------------------------------------------------------
+    for s in STRATEGY_TO_LABEL:
+        attr = s.replace("-", "_")
+        preds_list = getattr(predictions, attr)
+        if len(preds_list) != total:
+            raise ValueError(f"{s} prediction length mismatch")
+
+    # --------------------------------------------------------
+    # accumulators
+    # --------------------------------------------------------
+    strategy_em = {s: [] for s in STRATEGY_TO_LABEL}
+    strategy_f1 = {s: [] for s in STRATEGY_TO_LABEL}
+    strategy_combined = {s: [] for s in STRATEGY_TO_LABEL}
+
+    label_counts = {s: 0 for s in STRATEGY_TO_LABEL}
+    oracle_scores = []
 
     results = []
-    for start in tqdm(range(0, len(dataset), batch_size), desc="Labeling", unit="batch"):
+
+    # --------------------------------------------------------
+    # batching
+    # --------------------------------------------------------
+    for start in tqdm(range(0, total, batch_size), desc="Labeling"):
         batch = dataset[start:start + batch_size]
-        for batch_index, item in enumerate(batch):
-            global_index = start + batch_index
-            question = item["question"]
-            gold = item["answer"]
-            scores = {}
-            for strategy in ("no", "single", "multi"):
-                prediction = outputs[strategy][global_index]
-                scores[strategy] = max(compute_f1(prediction, gold), exact_match(prediction, gold))
 
-            label_name = _best_strategy(scores)
-            results.append(
-                {
-                    "question": question,
-                    "answer": gold,
-                    "label": STRATEGY_TO_LABEL[label_name],
-                    "label_name": label_name,
-                    "scores": scores,
-                }
-            )
+        ids = [x.id for x in batch]
+        questions = [x.question for x in batch]
+        golds = [x.gold for x in batch]
 
+        batch_scores = {}
+
+        # ----------------------------------------------------
+        # evaluate each strategy in vectorized batch
+        # ----------------------------------------------------
+        for strategy in STRATEGY_TO_LABEL:
+            attr = strategy.replace("-", "_")
+            preds_list = getattr(predictions, attr)
+            preds = preds_list[start:start + batch_size]
+            preds_texts = [p.prediction for p in preds]
+
+            res = evaluate_batch(preds_texts, golds)
+            em = res["em"]
+            f1 = res["f1"]
+            combined = f1 # baseline test - TODO: change
+            #combined = [(e + f) / 2 for e, f in zip(em, f1)]
+
+            strategy_em[strategy].extend(em)
+            strategy_f1[strategy].extend(f1)
+            strategy_combined[strategy].extend(combined)
+
+            batch_scores[strategy] = combined
+
+        # ----------------------------------------------------
+        # label assignment
+        # ----------------------------------------------------
+        for i in range(len(batch)):
+            scores = {s: batch_scores[s][i] for s in STRATEGY_TO_LABEL}
+
+            best = _best_strategy(scores)
+
+            label_counts[best] += 1
+            oracle_scores.append(max(scores.values()))
+
+            results.append({
+                "id": ids[i],
+                "question": questions[i],
+                "gold": golds[i],
+                "label": STRATEGY_TO_LABEL[best],
+                "label_name": best,
+                "scores": scores,
+            })
+
+    # --------------------------------------------------------
+    # stats
+    # --------------------------------------------------------
+    stats = {
+        "total": total,
+        "strategy_metrics": {},
+        "label_distribution": {},
+        "oracle_mean": mean(oracle_scores),
+    }
+
+    for s in STRATEGY_TO_LABEL:
+        stats["strategy_metrics"][s] = {
+            "em": mean(strategy_em[s]),
+            "f1": mean(strategy_f1[s]),
+            "combined": mean(strategy_combined[s]),
+        }
+
+    for s, c in label_counts.items():
+        stats["label_distribution"][s] = {
+            "count": c,
+            "pct": c / total,
+        }
+
+    # --------------------------------------------------------
+    # save
+    # --------------------------------------------------------
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w", encoding="utf-8") as handle:
-        json.dump(results, handle, indent=2)
-    print(f"[generate_labels] Wrote labels to {output_path}", flush=True)
+
+    with output_path.open("w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2)
+
+    with stats_path.open("w", encoding="utf-8") as f:
+        json.dump(stats, f, indent=2)
+
+    # --------------------------------------------------------
+    # print summary
+    # --------------------------------------------------------
+    print("\n=== Strategy Metrics ===")
+    for s, m in stats["strategy_metrics"].items():
+        print(f"{s:8s} | EM: {m['em']:.4f} | F1: {m['f1']:.4f} | Combined: {m['combined']:.4f}")
+
+    print("\n=== Label Distribution ===")
+    for s, d in stats["label_distribution"].items():
+        print(f"{s:8s} | {d['count']} ({d['pct']:.2%})")
+
+    print("\n=== Oracle ===")
+    print(f"{stats['oracle_mean']:.4f}")
+
+    print(f"\nSaved: {output_path}")
+    print(f"Saved: {stats_path}")
 
 
 if __name__ == "__main__":

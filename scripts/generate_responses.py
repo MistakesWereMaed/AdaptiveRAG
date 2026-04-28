@@ -1,60 +1,31 @@
+#!/usr/bin/env python
+"""Streaming inference for adaptive RAG with execution tracing.
+
+Outputs:
+  - outputs/<strategy>.jsonl - streaming predictions with trace info
+  - outputs/<strategy>_stats.json - aggregated execution metrics per strategy
+"""
+
 import argparse
 import json
+import sys
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Any
 
 from tqdm.auto import tqdm
 
-from src.data.preprocessing import extract_qa_records, load_records
-from src.llm import LocalLLM
-from src.pipeline import AdaptiveRAGPipeline
-from src.retriever import FaissIVFRetriever
-from src.utils.config import load_yaml_config
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from src.data.file_loader import load_records, load_yaml_config
+from src.rag.llm import LocalLLM
+from src.rag.pipeline import AdaptiveRAGPipeline
+from src.rag.retriever import FaissIVFRetriever
+from src.rag.streaming import StreamingJSONLWriter, MetricsAccumulator
 
 
-# ------------------------------------------------------------
-# Data utilities
-# ------------------------------------------------------------
-def _prepare_records(source: str) -> List[Dict[str, Any]]:
-    records = load_records(source)
-
-    structured = []
-
-    for i, r in enumerate(records):
-        if isinstance(r, dict):
-            q = r.get("question") or r.get("query")
-            if not q:
-                continue
-
-            structured.append({
-                "id": r.get("_id", i),
-                "question": q.strip(),
-                "gold": r.get("answer", None)
-            })
-
-        elif isinstance(r, str) and r.strip():
-            structured.append({
-                "id": i,
-                "question": r.strip(),
-                "gold": None
-            })
-
-    # fallback
-    if not structured:
-        qa_records = extract_qa_records(records)
-        for i, r in enumerate(qa_records):
-            structured.append({
-                "id": r.get("_id", i),
-                "question": r["question"],
-                "gold": r.get("answer", None)
-            })
-
-    return structured
-
-
-# ------------------------------------------------------------
-# IO utilities
-# ------------------------------------------------------------
+# ============================================================
+# Helpers
+# ============================================================
 def _as_path(p) -> Path:
     return p if isinstance(p, Path) else Path(p)
 
@@ -62,110 +33,198 @@ def _as_path(p) -> Path:
 def _require_index_dir(index_dir: str) -> Path:
     p = Path(index_dir)
     if not (p / "documents.json").exists():
-        raise FileNotFoundError(f"Missing index at {p}. Run build_index.py first.")
+        raise FileNotFoundError(f"Missing index at {p}")
     return p
 
 
-def _stage_output_path(base_output: Path, stage: str) -> Path:
-    return base_output.with_name(f"{base_output.stem}-{stage}{base_output.suffix}")
+def _output_path_for_strategy(base: Path, strategy: str) -> Path:
+    """Generate output path: outputs/predictions-<strategy>.jsonl"""
+    return base.with_name(f"{base.stem}-{strategy}.jsonl")
 
 
-def _write_stage(
-    base_output: Path,
-    stage: str,
-    records: List[Dict[str, Any]],
-    predictions: List[str],
-):
-    path = _stage_output_path(base_output, stage)
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    assert len(records) == len(predictions)
-
-    output = []
-    for r, pred in zip(records, predictions):
-        output.append({
-            "id": r["id"],
-            "question": r["question"],
-            "prediction": pred.strip(),
-            "gold": r["gold"],
-        })
-
-    with path.open("w", encoding="utf-8") as f:
-        json.dump(output, f, indent=2)
+def _stats_path_for_strategy(base: Path, strategy: str) -> Path:
+    """Generate stats path: outputs/predictions-<strategy>_stats.json"""
+    return base.with_name(f"{base.stem}-{strategy}_stats.json")
 
 
-# ------------------------------------------------------------
-# Stage execution
-# ------------------------------------------------------------
-def _run_stage(
+# ============================================================
+# Streaming execution
+# ============================================================
+def run_strategy_streaming(
     pipeline: AdaptiveRAGPipeline,
-    stage: str,
-    questions: List[str],
-) -> List[str]:
+    strategy: str,
+    records: List[Any],
+    output_path: Path,
+    stats_path: Path,
+    single_k: int,
+    multi_k: int,
+    batch_size: int = 8,
+):
+    """Execute strategy on all records, streaming results to JSONL.
+    
+    For each query:
+    1. Call appropriate pipeline method (with tracing)
+    2. Write result + trace to JSONL immediately
+    3. Accumulate metrics
+    
+    This maintains batch inference semantics (LLM/retriever still batch)
+    while streaming results incrementally to disk.
+    """
+    print(f"\n{'='*60}")
+    print(f"Strategy: {strategy}")
+    print(f"Output: {output_path}")
+    print(f"{'='*60}\n")
 
-    if stage == "no-rag":
-        return pipeline.no_retrieval(questions)
+    metrics = MetricsAccumulator()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if stage == "single":
-        return pipeline.single_step(questions)
+    with StreamingJSONLWriter(output_path) as writer:
+        pbar = tqdm(total=len(records), desc=strategy, unit="query")
 
-    if stage == "multi":
-        return pipeline.multi_step(questions)
+        for start in range(0, len(records), batch_size):
+            batch = records[start : start + batch_size]
+            questions = [r.question for r in batch]
 
-    raise ValueError(f"Unknown strategy: {stage}")
+            # Execute batched strategy with tracing
+            if strategy == "no-rag":
+                paired = pipeline.no_retrieval(questions, return_traces=True, start_query_id=start)
+            elif strategy == "single":
+                paired = pipeline.single_step(
+                    questions,
+                    k=single_k,
+                    return_traces=True,
+                    start_query_id=start,
+                )
+            elif strategy == "multi":
+                paired = pipeline.multi_step(
+                    questions,
+                    k=multi_k,
+                    return_traces=True,
+                    start_query_id=start,
+                )
+            else:
+                raise ValueError(f"Unknown strategy: {strategy}")
+
+            # paired: list of (prediction, trace) corresponding to batch order
+            for i, (prediction, trace) in enumerate(paired):
+                record = batch[i]
+
+                result = {
+                    "id": record.id,
+                    "question": record.question,
+                    "gold": record.gold,
+                    "prediction": prediction.strip(),
+                    "strategy": strategy,
+                    "retrieval_count": trace.retrieval_count,
+                    "llm_calls": trace.llm_call_count,
+                    "latency_s": trace.latency_s,
+                }
+
+                # Stream to disk immediately (no buffer)
+                writer.write(result)
+
+                # Accumulate metrics
+                metrics.record(
+                    latency_s=trace.latency_s,
+                    retrieval_count=trace.retrieval_count,
+                    llm_call_count=trace.llm_call_count,
+                )
+
+                # Advance progress bar and show running metrics
+                pbar.update(1)
+                if len(metrics.latencies) >= 10:
+                    avg_latency = sum(metrics.latencies[-10:]) / 10
+                    pbar.set_postfix({
+                        "latency": f"{avg_latency:.2f}s",
+                        "retrievals": metrics.retrieval_counts[-1],
+                        "llm_calls": metrics.llm_call_counts[-1],
+                    })
+
+    # Write aggregated stats
+    stats = metrics.to_dict()
+    stats_path.parent.mkdir(parents=True, exist_ok=True)
+    with stats_path.open("w", encoding="utf-8") as f:
+        json.dump(stats, f, indent=2)
+
+    print(f"\nStats saved: {stats_path}")
+    print(json.dumps(stats, indent=2))
+
+    # Verify output count
+    written_count = writer.get_count()
+    assert written_count == len(records), (
+        f"Output count mismatch: {written_count} written vs {len(records)} records"
+    )
 
 
-# ------------------------------------------------------------
+# ============================================================
 # Main
-# ------------------------------------------------------------
+# ============================================================
 def main():
-    parser = argparse.ArgumentParser(description="Run Adaptive RAG (single process)")
-    parser.add_argument("--config", default="configs/pipeline.yaml")
+    parser = argparse.ArgumentParser(
+        description="Stream adaptive RAG predictions with execution traces"
+    )
+    parser.add_argument("--config", default="config.yaml")
     args = parser.parse_args()
 
-    # ---- Load configs ----
-    cfg = load_yaml_config(args.config)
-    llm_cfg = load_yaml_config(cfg["llm_config"])
-    retr_cfg = load_yaml_config(cfg["retriever_config"])
+    # Load config
+    cfg = load_yaml_config(args.config, section="pipeline")
+    if "llm_config" in cfg and "retriever_config" in cfg:
+        llm_cfg = load_yaml_config(cfg["llm_config"], section="llm")
+        retr_cfg = load_yaml_config(cfg["retriever_config"], section="retriever")
+    else:
+        llm_cfg = load_yaml_config(args.config, section="llm")
+        retr_cfg = load_yaml_config(args.config, section="retriever")
 
-    # ---- Normalize paths ----
-    output_path = _as_path(cfg["output"])
+    # Load data
+    output_base = _as_path(cfg["output"])
     index_dir = _require_index_dir(cfg["index_dir"])
+    records = load_records(cfg["questions"])
+    single_k = int(retr_cfg.get("top_k_single", 5))
+    multi_k = int(retr_cfg.get("top_k_multi", max(1, single_k - 2)))
 
-    # ---- Prepare data ----
-    records = _prepare_records(cfg["questions"])
-    questions = [r["question"] for r in records]
+    print(f"[inference] Loaded {len(records)} records")
+    print(f"[inference] Output base: {output_base}")
 
-    # ---- Init components ----
+    # Initialize components
+    print("[inference] Initializing LLM...")
     llm = LocalLLM(llm_cfg)
 
-    retriever = FaissIVFRetriever(
-        encoder_name=retr_cfg["encoder_name"]
-    )
+    print("[inference] Loading retriever index...")
+    retriever = FaissIVFRetriever(encoder_name=retr_cfg["encoder_name"])
     retriever.load(index_dir)
 
     pipeline = AdaptiveRAGPipeline(llm, retriever)
 
-    # ---- Determine stages ----
-    strategy = cfg["strategy"]
-
-    if strategy == "all":
-        stages = ["no-rag", "single", "multi"]
-    elif isinstance(strategy, list):
-        stages = strategy
+    # Determine strategies to run
+    strategy_cfg = cfg.get("strategy", "multi")
+    if strategy_cfg == "all":
+        strategies = ["no-rag", "single", "multi"]
+    elif isinstance(strategy_cfg, list):
+        strategies = strategy_cfg
     else:
-        stages = [strategy]
+        strategies = [strategy_cfg]
 
-    # ---- Run stages sequentially ----
-    for stage in stages:
-        print(f"\n=== Running stage: {stage} ===")
+    # Execute each strategy with streaming output
+    for strategy in strategies:
+        output_path = _output_path_for_strategy(output_base, strategy)
+        stats_path = _stats_path_for_strategy(output_base, strategy)
 
-        predictions = _run_stage(pipeline, stage, questions)
+        batch_size = int(cfg.get("pipeline_batch_size"))
 
-        # ---- Save structured outputs immediately ----
-        _write_stage(output_path, stage, records, predictions)
+        run_strategy_streaming(
+            pipeline,
+            strategy,
+            records,
+            output_path,
+            stats_path,
+            single_k=single_k,
+            multi_k=multi_k,
+            batch_size=batch_size,
+        )
 
-        print(f"Saved {stage} → {_stage_output_path(output_path, stage)}")
+    print("\n" + "="*60)
+    print("Streaming inference complete")
+    print("="*60)
 
 
 if __name__ == "__main__":

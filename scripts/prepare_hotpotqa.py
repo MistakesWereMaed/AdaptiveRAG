@@ -5,13 +5,30 @@ from pathlib import Path
 from tqdm.auto import tqdm
 
 from src.data.hotpotqa import hotpotqa_context_to_documents, hotpotqa_dataset_to_records, load_hotpotqa_split
-from src.utils.config import load_yaml_config
+from src.data.file_loader import load_yaml_config
+
+
+def _ensure_ids(records):
+    normalized = []
+    for index, record in enumerate(records):
+        current = dict(record)
+        raw_id = current.get("id")
+        if raw_id is None:
+            current["id"] = index
+        else:
+            try:
+                current["id"] = int(raw_id)
+            except (TypeError, ValueError):
+                current["source_id"] = raw_id
+                current["id"] = index
+        normalized.append(current)
+    return normalized
 
 
 def _write_jsonl(records, output_path: Path):
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8") as handle:
-        for record in tqdm(records, desc=f"Writing {output_path.name}", unit="record"):
+        for record in tqdm(_ensure_ids(records), desc=f"Writing {output_path.name}", unit="record"):
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
@@ -34,10 +51,10 @@ def _build_corpus(records):
 def main():
     print("[prepare_hotpotqa] Starting HotpotQA preprocessing", flush=True)
     parser = argparse.ArgumentParser(description="Download and preprocess HotpotQA")
-    parser.add_argument("--config", default="configs/hotpotqa.yaml", help="Path to HotpotQA config")
+    parser.add_argument("--config", default="config.yaml", help="Path to HotpotQA config")
     args = parser.parse_args()
 
-    config = load_yaml_config(args.config)
+    config = load_yaml_config(args.config, section="hotpotqa")
     output_dir = Path(config["output_dir"])
     config_name = str(config["config_name"])
     build_corpus = bool(config["build_corpus"])
@@ -45,13 +62,11 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     for split in tqdm(("train", "validation"), desc="HotpotQA splits", unit="split"):
-        print(f"[prepare_hotpotqa] Loading split={split}", flush=True)
         dataset = load_hotpotqa_split(split=split, config_name=config_name)
         records = hotpotqa_dataset_to_records(dataset)
         _write_jsonl(records, output_dir / f"{split}.jsonl")
 
         if build_corpus and split == "train":
-            print("[prepare_hotpotqa] Building corpus from train split", flush=True)
             corpus = _build_corpus(records)
             if not corpus:
                 raise ValueError("HotpotQA corpus extraction produced no passages; check the dataset schema or config name")

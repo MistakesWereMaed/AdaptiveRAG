@@ -1,7 +1,0 @@
-encoder_name: all-MiniLM-L6-v2
-corpus: data/hotpotqa/corpus.jsonl
-output_dir: outputs/index
-top_k_single: 2
-top_k_multi: 2
-index_type: flat_l2
-

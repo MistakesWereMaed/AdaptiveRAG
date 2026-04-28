@@ -11,17 +11,17 @@ from pytorch_lightning.loggers import WandbLogger
 
 from src.classifier.datamodule import RouterDataModule
 from src.classifier.lightning_module import RouterLightningModule
-from src.utils.config import load_yaml_config
+from src.data.file_loader import load_yaml_config
 from src.utils.distributed import is_distributed, is_main_process
 
 
 def main():
     print("[train_classifier] Starting trainer setup", flush=True)
     parser = argparse.ArgumentParser(description="Train the router classifier")
-    parser.add_argument("--config", default="configs/train.yaml", help="Path to training config")
+    parser.add_argument("--config", default="config.yaml", help="Path to training config")
     args = parser.parse_args()
 
-    config = load_yaml_config(args.config)
+    config = load_yaml_config(args.config, section="train")
     train_data = str(config["train_data"])
     model_name = str(config["model_name"])
     batch_size = int(config["batch_size"])

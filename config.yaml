@@ -1,0 +1,109 @@
+# Combined configuration for AdaptiveRAG
+# This single file gathers all stage-specific configs under explicit keys.
+# Sections:
+#  - hotpotqa
+#  - llm
+#  - retriever
+#  - pipeline
+#  - labels
+#  - model
+#  - train
+#  - evaluate
+
+# -------------------------
+# HotpotQA preprocessing
+# -------------------------
+hotpotqa:
+  output_dir: data/hotpotqa
+  config_name: distractor
+  build_corpus: true
+
+# -------------------------
+# LLM / generation defaults
+# -------------------------
+llm:
+  model_name: Qwen/Qwen2.5-7B-Instruct
+  tensor_parallel_size: 1
+  max_model_len: 4096
+  gpu_memory_utilization: 0.75
+  dtype: float16
+  trust_remote_code: false
+  max_num_seqs: 32
+  max_tokens: 32
+
+  # Sampling defaults
+  max_new_tokens: 32
+  temperature: 0.0
+  top_p: 1.0
+  use_tqdm: False
+
+# -------------------------
+# Retriever
+# -------------------------
+retriever:
+  encoder_name: all-MiniLM-L6-v2
+  corpus: data/hotpotqa/corpus.jsonl
+  output_dir: outputs/index
+  top_k_single: 5
+  top_k_multi: 3
+  index_type: flat_l2
+
+# -------------------------
+# Pipeline defaults
+# -------------------------
+pipeline:
+  questions: data/hotpotqa/train.jsonl
+  output: data/predictions/predictions.json
+  strategy: single
+  index_dir: outputs/index
+  pipeline_batch_size: 128
+
+# -------------------------
+# Label generation
+# -------------------------
+labels:
+  dataset: data/hotpotqa/train.jsonl
+  predictions: outputs/predictions.json
+  output: outputs/labeled_train.json
+  batch_size: 32
+
+# -------------------------
+# Model / classifier training
+# -------------------------
+model:
+  model_name: bert-base-uncased
+  num_classes: 3
+  dropout: 0.1
+  learning_rate: 2e-5
+  max_length: 256
+
+# -------------------------
+# Training / experiment
+# -------------------------
+train:
+  batch_size: 8
+  max_epochs: 3
+  use_wandb: true
+  strategy: auto
+  devices: auto
+  num_nodes: 1
+  precision: "fp16"
+  accelerator: auto
+  train_data: data/hotpotqa/train.jsonl
+  val_data: data/hotpotqa/validation.jsonl
+  questions: data/hotpotqa/train.jsonl
+  references: data/hotpotqa/validation.jsonl
+  corpus: data/hotpotqa/corpus.jsonl
+  output: outputs/predictions.json
+  index_dir: outputs/index
+  rebuild_index: false
+  save_index: false
+
+# -------------------------
+# Evaluate stage
+# -------------------------
+evaluate:
+  # Path to prediction file produced by the pipeline
+  predictions: outputs/predictions.json
+  # References / ground-truth file used for evaluation
+  references: data/hotpotqa/validation.jsonl

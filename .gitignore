@@ -23,14 +23,14 @@ dist/
 .env.*
 
 # Model and experiment artifacts
-outputs/
 wandb/
-data/hotpotqa/
 *.pt
 *.pth
 *.ckpt
 *.bin
 *.safetensors
+*.json
+*.jsonl
 
 # Retrieval and cache files
 cache.json
