@@ -2,8 +2,8 @@
 """Streaming inference for adaptive RAG with execution tracing.
 
 Outputs:
-  - outputs/<strategy>.jsonl - streaming predictions with trace info
-  - outputs/<strategy>_stats.json - aggregated execution metrics per strategy
+    - data/predictions/predictions-<strategy>.jsonl - streaming predictions with trace info
+    - data/predictions/predictions-<strategy>_stats.json - aggregated execution metrics per strategy
 """
 
 import argparse
@@ -20,7 +20,7 @@ from src.data.file_loader import load_records, load_yaml_config
 from src.rag.llm import LocalLLM
 from src.rag.pipeline import AdaptiveRAGPipeline
 from src.rag.retriever import FaissIVFRetriever
-from src.rag.streaming import StreamingJSONLWriter, MetricsAccumulator
+from src.rag.streaming import StreamingJSONLWriter, MetricsAccumulator, StreamingPrettyWriter
 
 
 # ============================================================
@@ -38,12 +38,12 @@ def _require_index_dir(index_dir: str) -> Path:
 
 
 def _output_path_for_strategy(base: Path, strategy: str) -> Path:
-    """Generate output path: outputs/predictions-<strategy>.jsonl"""
+    """Generate output path: predictions-<strategy>.jsonl in the shared predictions directory."""
     return base.with_name(f"{base.stem}-{strategy}.jsonl")
 
 
 def _stats_path_for_strategy(base: Path, strategy: str) -> Path:
-    """Generate stats path: outputs/predictions-<strategy>_stats.json"""
+    """Generate stats path: predictions-<strategy>_stats.json in the shared predictions directory."""
     return base.with_name(f"{base.stem}-{strategy}_stats.json")
 
 
@@ -78,7 +78,8 @@ def run_strategy_streaming(
     metrics = MetricsAccumulator()
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with StreamingJSONLWriter(output_path) as writer:
+    # Write both compact JSONL (tooling) and a pretty JSON array for humans
+    with StreamingJSONLWriter(output_path) as writer, StreamingPrettyWriter(output_path) as pretty_writer:
         pbar = tqdm(total=len(records), desc=strategy, unit="query")
 
         for start in range(0, len(records), batch_size):
@@ -106,7 +107,14 @@ def run_strategy_streaming(
                 raise ValueError(f"Unknown strategy: {strategy}")
 
             # paired: list of (prediction, trace) corresponding to batch order
-            for i, (prediction, trace) in enumerate(paired):
+            for i, item in enumerate(paired):
+                # pipeline returns (prediction, trace, context)
+                if len(item) == 3:
+                    prediction, trace, context = item
+                else:
+                    prediction, trace = item
+                    context = ""
+
                 record = batch[i]
 
                 result = {
@@ -114,14 +122,17 @@ def run_strategy_streaming(
                     "question": record.question,
                     "gold": record.gold,
                     "prediction": prediction.strip(),
+                    "context": context,
                     "strategy": strategy,
                     "retrieval_count": trace.retrieval_count,
                     "llm_calls": trace.llm_call_count,
                     "latency_s": trace.latency_s,
                 }
 
-                # Stream to disk immediately (no buffer)
+                # Stream compact line for tooling
                 writer.write(result)
+                # Stream pretty human-readable JSON array
+                pretty_writer.write(result)
 
                 # Accumulate metrics
                 metrics.record(
@@ -167,6 +178,7 @@ def main():
     args = parser.parse_args()
 
     # Load config
+    paths = load_yaml_config(args.config, section="paths")
     cfg = load_yaml_config(args.config, section="pipeline")
     if "llm_config" in cfg and "retriever_config" in cfg:
         llm_cfg = load_yaml_config(cfg["llm_config"], section="llm")
@@ -176,11 +188,11 @@ def main():
         retr_cfg = load_yaml_config(args.config, section="retriever")
 
     # Load data
-    output_base = _as_path(cfg["output"])
-    index_dir = _require_index_dir(cfg["index_dir"])
-    records = load_records(cfg["questions"])
-    single_k = int(retr_cfg.get("top_k_single", 5))
-    multi_k = int(retr_cfg.get("top_k_multi", max(1, single_k - 2)))
+    output_base = _as_path(paths["predictions_base"])
+    index_dir = _require_index_dir(paths["index_dir"])
+    records = load_records(paths["train_data"])
+    single_k = int(retr_cfg.get("top_k_single"))
+    multi_k = int(retr_cfg.get("top_k_multi"))
 
     print(f"[inference] Loaded {len(records)} records")
     print(f"[inference] Output base: {output_base}")

@@ -54,8 +54,9 @@ def main():
     parser.add_argument("--config", default="config.yaml", help="Path to HotpotQA config")
     args = parser.parse_args()
 
+    paths = load_yaml_config(args.config, section="paths")
     config = load_yaml_config(args.config, section="hotpotqa")
-    output_dir = Path(config["output_dir"])
+    output_dir = Path(paths["hotpotqa_dir"])
     config_name = str(config["config_name"])
     build_corpus = bool(config["build_corpus"])
 
@@ -70,7 +71,7 @@ def main():
             corpus = _build_corpus(records)
             if not corpus:
                 raise ValueError("HotpotQA corpus extraction produced no passages; check the dataset schema or config name")
-            _write_jsonl(corpus, output_dir / "corpus.jsonl")
+            _write_jsonl(corpus, Path(paths["corpus"]))
 
 
 if __name__ == "__main__":

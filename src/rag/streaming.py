@@ -35,7 +35,7 @@ class StreamingJSONLWriter:
         if self.file is None:
             raise RuntimeError("Must use context manager: with StreamingJSONLWriter(...) as w:")
         
-        # Serialize to JSON and write as single line
+        # Serialize to compact JSON line for tooling compatibility
         line = json.dumps(record, ensure_ascii=False)
         self.file.write(line + "\n")
         self.file.flush()  # Ensure immediate disk write
@@ -84,3 +84,42 @@ class MetricsAccumulator:
             "total_retrievals": sum(self.retrieval_counts),
             "total_llm_calls": sum(self.llm_call_counts),
         }
+
+
+class StreamingPrettyWriter:
+    """Write a pretty-printed JSON array incrementally.
+
+    Produces a human-readable `*.pretty.json` file alongside compact JSONL.
+    """
+
+    def __init__(self, output_path: Path):
+        self.output_path = Path(output_path)
+        self.file = None
+        self.first = True
+
+    def __enter__(self):
+        # pretty file will be same dirname with .pretty.json suffix
+        pretty_path = self.output_path.with_suffix(".pretty.json")
+        pretty_path.parent.mkdir(parents=True, exist_ok=True)
+        self.file = pretty_path.open("w", encoding="utf-8")
+        self.file.write("[\n")
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.file:
+            self.file.write("\n]\n")
+            self.file.close()
+
+    def write(self, record: Dict[str, Any]):
+        if self.file is None:
+            raise RuntimeError("Must use context manager: with StreamingPrettyWriter(...) as w:")
+
+        if not self.first:
+            self.file.write(",\n")
+        self.first = False
+
+        pretty = json.dumps(record, ensure_ascii=False, indent=2)
+        # indent record block by two spaces for nice nesting
+        indented = "\n".join("  " + line for line in pretty.splitlines())
+        self.file.write(indented)
+        self.file.flush()

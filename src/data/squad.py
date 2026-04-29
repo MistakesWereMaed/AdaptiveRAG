@@ -1,28 +1,33 @@
+import re
 import string
+import unicodedata
 from collections import Counter
 from typing import Dict, List
-
 
 # -----------------------------
 # Normalization
 # -----------------------------
 _punct_table = str.maketrans("", "", string.punctuation)
+_ARTICLES = {"a", "an", "the"}
 
 
 def normalize(text: str) -> List[str]:
-    """
-    Lowercase, remove punctuation, collapse whitespace, return tokens.
-    """
-    if text is None:
+    if not text:
         return []
 
+    text = unicodedata.normalize("NFKD", text)
     text = text.lower()
     text = text.translate(_punct_table)
-    return text.split()
+    text = re.sub(r"\s+", " ", text).strip()
+
+    tokens = text.split()
+    tokens = [t for t in tokens if t not in _ARTICLES]
+
+    return tokens
 
 
 # -----------------------------
-# F1 computation (vectorized-style per pair)
+# Metrics
 # -----------------------------
 def f1_score(pred_tokens: List[str], gold_tokens: List[str]) -> float:
     if not pred_tokens or not gold_tokens:
@@ -44,41 +49,45 @@ def exact_match(pred_tokens: List[str], gold_tokens: List[str]) -> float:
     return float(pred_tokens == gold_tokens)
 
 
-# -----------------------------
-# Core vectorized evaluator
-# -----------------------------
-def evaluate_batch(
-    predictions: List[str],
-    references: List[str],
-) -> Dict[str, List[float]]:
+def accuracy(pred: str, gold: str) -> float:
     """
-    Fully vectorized batch SQuAD evaluation.
-
-    Returns:
-        {
-            "f1": [...],
-            "em": [...]
-        }
+    Loose containment metric (for reporting only).
     """
+    if not pred or not gold:
+        return 0.0
+    return float(normalize(gold) == normalize(pred) or " ".join(normalize(gold)) in " ".join(normalize(pred)))
 
-    f1s = []
-    ems = []
+
+# -----------------------------
+# Batch evaluation
+# -----------------------------
+def evaluate_batch(predictions: List[str], references: List[str]) -> Dict[str, List[float]]:
+    f1s, ems, accs = [], [], []
 
     for pred, gold in zip(predictions, references):
         pred_toks = normalize(pred)
         gold_toks = normalize(gold)
 
-        f1s.append(f1_score(pred_toks, gold_toks))
-        ems.append(exact_match(pred_toks, gold_toks))
+        f1 = f1_score(pred_toks, gold_toks)
+        em = exact_match(pred_toks, gold_toks)
+        acc = accuracy(pred, gold)
 
-    return {
-        "f1": f1s,
-        "em": ems,
-    }
+        f1s.append(f1)
+        ems.append(em)
+        accs.append(acc)
+
+    return {"f1": f1s, "em": ems, "acc": accs}
 
 
 # -----------------------------
-# Aggregation helper
+# Correctness
 # -----------------------------
+def is_correct(pred: str, gold: str, f1: float, em: float) -> bool:
+    """
+    Binary correctness used for labeling.
+    """
+    return em == 1.0 or f1 >= 0.8
+
+
 def mean(xs: List[float]) -> float:
     return sum(xs) / len(xs) if xs else 0.0

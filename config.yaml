@@ -1,6 +1,7 @@
 # Combined configuration for AdaptiveRAG
 # This single file gathers all stage-specific configs under explicit keys.
 # Sections:
+#  - paths
 #  - hotpotqa
 #  - llm
 #  - retriever
@@ -11,10 +12,25 @@
 #  - evaluate
 
 # -------------------------
+# Shared paths
+# -------------------------
+paths:
+  hotpotqa_dir: &hotpotqa_dir data/hotpotqa
+  train_data: &train_data data/hotpotqa/train.jsonl
+  validation_data: &validation_data data/hotpotqa/validation.jsonl
+  corpus: &corpus data/hotpotqa/corpus.jsonl
+  index_dir: &index_dir data/index
+  predictions_base: &predictions_base data/predictions/predictions.jsonl
+  predictions_no_rag: &predictions_no_rag data/predictions/predictions-no-rag.jsonl
+  predictions_single: &predictions_single data/predictions/predictions-single.jsonl
+  predictions_multi: &predictions_multi data/predictions/predictions-multi.jsonl
+  labeled_train: &labeled_train data/labeled/labeled_train.json
+  labeled_stats: &labeled_stats data/labeled/labeled_train.stats.json
+
+# -------------------------
 # HotpotQA preprocessing
 # -------------------------
 hotpotqa:
-  output_dir: data/hotpotqa
   config_name: distractor
   build_corpus: true
 
@@ -41,30 +57,22 @@ llm:
 # Retriever
 # -------------------------
 retriever:
-  encoder_name: all-MiniLM-L6-v2
-  corpus: data/hotpotqa/corpus.jsonl
-  output_dir: outputs/index
-  top_k_single: 5
-  top_k_multi: 3
+  encoder_name: BAAI/bge-base-en-v1.5
+  top_k_single: 4
+  top_k_multi: 6
   index_type: flat_l2
 
 # -------------------------
 # Pipeline defaults
 # -------------------------
 pipeline:
-  questions: data/hotpotqa/train.jsonl
-  output: data/predictions/predictions.json
-  strategy: single
-  index_dir: outputs/index
+  strategy: multi
   pipeline_batch_size: 128
 
 # -------------------------
 # Label generation
 # -------------------------
 labels:
-  dataset: data/hotpotqa/train.jsonl
-  predictions: outputs/predictions.json
-  output: outputs/labeled_train.json
   batch_size: 32
 
 # -------------------------
@@ -89,13 +97,6 @@ train:
   num_nodes: 1
   precision: "fp16"
   accelerator: auto
-  train_data: data/hotpotqa/train.jsonl
-  val_data: data/hotpotqa/validation.jsonl
-  questions: data/hotpotqa/train.jsonl
-  references: data/hotpotqa/validation.jsonl
-  corpus: data/hotpotqa/corpus.jsonl
-  output: outputs/predictions.json
-  index_dir: outputs/index
   rebuild_index: false
   save_index: false
 
@@ -103,7 +104,4 @@ train:
 # Evaluate stage
 # -------------------------
 evaluate:
-  # Path to prediction file produced by the pipeline
-  predictions: outputs/predictions.json
-  # References / ground-truth file used for evaluation
-  references: data/hotpotqa/validation.jsonl
+  prediction_path_key: predictions_multi

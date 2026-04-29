@@ -14,9 +14,10 @@ def main():
     parser.add_argument("--config", default="config.yaml", help="Path to retriever config")
     args = parser.parse_args()
 
+    paths = load_yaml_config(args.config, section="paths")
     config = load_yaml_config(args.config, section="retriever")
-    corpus_path = str(config["corpus"])
-    output_dir = str(config["output_dir"])
+    corpus_path = str(paths["corpus"])
+    output_dir = str(paths["index_dir"])
     encoder_name = str(config["encoder_name"])
 
     print(f"[build_index] Loading corpus from {corpus_path}", flush=True)

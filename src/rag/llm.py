@@ -5,63 +5,50 @@ from src.rag.trace import ExecutionTrace
 
 class LocalLLM:
     def __init__(self, config: dict):
-        model_name = str(config["model_name"])
-        tensor_parallel_size = int(config["tensor_parallel_size"])
+        self.model_name = config["model_name"]
 
         self.default_max_new_tokens = int(config["max_new_tokens"])
         self.default_temperature = float(config["temperature"])
         self.default_top_p = float(config["top_p"])
-        self.default_use_tqdm = bool(config.get("use_tqdm"))
+        self.use_tqdm = bool(config.get("use_tqdm", False))
 
-        llm_kwargs: dict[str, Any] = {
-            "model": model_name,
-            "tensor_parallel_size": tensor_parallel_size,
-            "trust_remote_code": bool(config["trust_remote_code"]),
-        }
+        self.llm = LLM(
+            model=self.model_name,
+            tensor_parallel_size=int(config["tensor_parallel_size"]),
+            trust_remote_code=bool(config.get("trust_remote_code", False)),
+            dtype=config.get("dtype", "float16"),
+            gpu_memory_utilization=float(config.get("gpu_memory_utilization", 0.9)),
+            max_model_len=int(config.get("max_model_len", 2048)),
+        )
 
-        dtype = config.get("dtype")
-        if dtype:
-            llm_kwargs["dtype"] = str(dtype)
-
-        gpu_memory_utilization = config.get("gpu_memory_utilization")
-        if gpu_memory_utilization is not None:
-            llm_kwargs["gpu_memory_utilization"] = float(gpu_memory_utilization)
-
-        max_model_len = config.get("max_model_len")
-        if max_model_len is not None:
-            llm_kwargs["max_model_len"] = int(max_model_len)
-
-        self.llm = LLM(**llm_kwargs)
-        self._sampling_params_cls: Any = SamplingParams
-
-    # --------------------------------------------------
+    # -----------------------------
     # Prompt
-    # --------------------------------------------------
+    # -----------------------------
     def format_prompt(self, question: str, context: Optional[str] = None) -> str:
         if context:
             return (
-                "You are a question answering system.\n"
-                "Answer the question using ONLY the provided context.\n"
-                "Return ONLY a short, final answer. No explanation.\n\n"
+                "You are a precise question answering system.\n"
+                "Answer using ONLY the provided context.\n"
+                "If the answer is not contained in the context, respond: unknown.\n"
+                "Be concise.\n\n"
                 f"Context:\n{context}\n\n"
                 f"Question: {question}\n"
                 "Answer:"
             )
-        else:
-            return (
-                "You are a question answering system.\n"
-                "Return ONLY a short, final answer. No explanation.\n\n"
-                f"Question: {question}\n"
-                "Answer:"
-            )
 
+        return (
+            "You are a precise question answering system.\n"
+            "Answer the question concisely.\n\n"
+            f"Question: {question}\n"
+            "Answer:"
+        )
 
-    # --------------------------------------------------
+    # -----------------------------
     # Generation
-    # --------------------------------------------------
+    # -----------------------------
     def generate(
         self,
-        prompts: Union[str, List[str]],
+        prompts: List[str],
         max_new_tokens: Optional[int] = None,
         temperature: Optional[float] = None,
         top_p: Optional[float] = None,
@@ -71,66 +58,40 @@ class LocalLLM:
         if isinstance(prompts, str):
             prompts = [prompts]
 
-        # Record LLM call in trace(s) (before execution)
         if trace is not None:
-            # support single trace or list of traces
             if isinstance(trace, list):
                 for t in trace:
-                    if t is not None:
-                        t.record_llm_call(1)
+                    t.record_llm_call(1)
             else:
                 trace.record_llm_call(1)
 
-        max_new_tokens = max_new_tokens if max_new_tokens is not None else self.default_max_new_tokens
-        temperature = temperature if temperature is not None else self.default_temperature
-        top_p = top_p if top_p is not None else self.default_top_p
-
-        sampling_params = SamplingParams(
-            temperature=temperature,
-            top_p=top_p,
-            max_tokens=max_new_tokens,
-            stop=["\n", "\n\n", "Question:", "Context:"]
+        sampling = SamplingParams(
+            temperature=temperature or self.default_temperature,
+            top_p=top_p or self.default_top_p,
+            max_tokens=max_new_tokens or self.default_max_new_tokens,
+            stop=["\n\n", "Question:", "Context:"],
         )
 
-        outputs = self.llm.generate(
-            prompts,
-            sampling_params=sampling_params,
-            use_tqdm=self.default_use_tqdm,
-        )
+        outputs = self.llm.generate(prompts, sampling_params=sampling, use_tqdm=self.use_tqdm)
 
-        results: List[str] = []
-        for output in outputs:
-            if output.outputs:
-                results.append(output.outputs[0].text)
-            else:
-                results.append("")
+        return [o.outputs[0].text if o.outputs else "" for o in outputs]
 
-        return results
-
-    # --------------------------------------------------
-    # QA API
-    # --------------------------------------------------
+    # -----------------------------
+    # QA wrapper
+    # -----------------------------
     def answer(
         self,
-        questions: Union[str, List[str]],
-        contexts: Optional[Union[str, List[str]]] = None,
+        questions: List[str],
+        contexts: Optional[List[str]] = None,
         trace: Optional[ExecutionTrace] = None,
-        **kwargs,
     ) -> List[str]:
-
-        if isinstance(questions, str):
-            questions = [questions]
 
         if contexts is None:
             contexts = [None] * len(questions)
-        elif isinstance(contexts, str):
-            contexts = [contexts]
 
         prompts = [
-            self.format_prompt(question, context)
-            for question, context in zip(questions, contexts)
+            self.format_prompt(q, c)
+            for q, c in zip(questions, contexts)
         ]
 
-        outputs = self.generate(prompts, trace=trace, **kwargs)
-
-        return outputs
+        return self.generate(prompts, trace=trace)

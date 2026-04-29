@@ -21,8 +21,9 @@ def main():
     parser.add_argument("--config", default="config.yaml", help="Path to training config")
     args = parser.parse_args()
 
+    paths = load_yaml_config(args.config, section="paths")
     config = load_yaml_config(args.config, section="train")
-    train_data = str(config["train_data"])
+    train_data = str(paths["train_data"])
     model_name = str(config["model_name"])
     batch_size = int(config["batch_size"])
     max_epochs = int(config["max_epochs"])
@@ -33,7 +34,7 @@ def main():
     num_nodes = int(config["num_nodes"])
     precision = config["precision"]
     accelerator = config["accelerator"]
-    val_data = config.get("val_data")
+    val_data = str(paths["validation_data"])
 
     torchrun_mode = is_distributed()
     if torchrun_mode:

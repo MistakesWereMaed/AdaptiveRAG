@@ -9,67 +9,48 @@ from tqdm import tqdm
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.data.file_loader import load_records, load_predictions
-from src.data.squad import evaluate_batch, mean
+from src.data.squad import evaluate_batch, is_correct, mean
 
 
-# ============================================================
-# Label mapping
-# ============================================================
 STRATEGY_TO_LABEL = {"no-rag": 0, "single": 1, "multi": 2}
-STRATEGY_PRIORITY = {"no-rag": 0, "single": 1, "multi": 2}
+STRATEGY_PRIORITY = ["no-rag", "single", "multi"]  # ordered
 
 
-# ============================================================
-# Utilities
-# ============================================================
-def _best_strategy(scores: Dict[str, float]) -> str:
-    return max(scores.items(), key=lambda x: (x[1], -STRATEGY_PRIORITY[x[0]]))[0]
-
-
-# ============================================================
-# Main
-# ============================================================
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="config.yaml")
     args = parser.parse_args()
 
     cfg = __import__("yaml").safe_load(open(args.config))
-    cfg = cfg.get("labels", cfg)
+    paths = cfg["paths"]
+    cfg_labels = cfg["labels"]
 
-    dataset = load_records(cfg["dataset"])
-    predictions = load_predictions(cfg["predictions"])
+    dataset = load_records(paths["train_data"])
+    predictions = load_predictions(paths["predictions_base"])
 
-    batch_size = int(cfg["batch_size"])
-    output_path = Path(cfg["output"])
-    stats_path = output_path.with_suffix(".stats.json")
+    batch_size = int(cfg_labels["batch_size"])
+    output_path = Path(paths["labeled_train"])
+    stats_path = Path(paths["labeled_stats"])
 
     total = len(dataset)
 
-    # --------------------------------------------------------
-    # validation
-    # --------------------------------------------------------
-    for s in STRATEGY_TO_LABEL:
-        attr = s.replace("-", "_")
-        preds_list = getattr(predictions, attr)
-        if len(preds_list) != total:
-            raise ValueError(f"{s} prediction length mismatch")
-
-    # --------------------------------------------------------
+    # -----------------------------
     # accumulators
-    # --------------------------------------------------------
-    strategy_em = {s: [] for s in STRATEGY_TO_LABEL}
-    strategy_f1 = {s: [] for s in STRATEGY_TO_LABEL}
-    strategy_combined = {s: [] for s in STRATEGY_TO_LABEL}
+    # -----------------------------
+    strategy_metrics = {
+        s: {"f1": [], "em": [], "acc": []}
+        for s in STRATEGY_TO_LABEL
+    }
 
     label_counts = {s: 0 for s in STRATEGY_TO_LABEL}
+    unlabeled_count = 0
     oracle_scores = []
 
     results = []
 
-    # --------------------------------------------------------
+    # -----------------------------
     # batching
-    # --------------------------------------------------------
+    # -----------------------------
     for start in tqdm(range(0, total, batch_size), desc="Labeling"):
         batch = dataset[start:start + batch_size]
 
@@ -77,64 +58,77 @@ def main():
         questions = [x.question for x in batch]
         golds = [x.gold for x in batch]
 
-        batch_scores = {}
+        batch_eval = {}
 
-        # ----------------------------------------------------
-        # evaluate each strategy in vectorized batch
-        # ----------------------------------------------------
+        # ---- evaluate each strategy ----
         for strategy in STRATEGY_TO_LABEL:
-            attr = strategy.replace("-", "_")
-            preds_list = getattr(predictions, attr)
+            preds_list = getattr(predictions, strategy.replace("-", "_"))
             preds = preds_list[start:start + batch_size]
-            preds_texts = [p.prediction for p in preds]
+            pred_texts = [p.prediction for p in preds]
 
-            res = evaluate_batch(preds_texts, golds)
-            em = res["em"]
-            f1 = res["f1"]
-            combined = f1 # baseline test - TODO: change
-            #combined = [(e + f) / 2 for e, f in zip(em, f1)]
+            res = evaluate_batch(pred_texts, golds)
 
-            strategy_em[strategy].extend(em)
-            strategy_f1[strategy].extend(f1)
-            strategy_combined[strategy].extend(combined)
+            strategy_metrics[strategy]["f1"].extend(res["f1"])
+            strategy_metrics[strategy]["em"].extend(res["em"])
+            strategy_metrics[strategy]["acc"].extend(res["acc"])
 
-            batch_scores[strategy] = combined
+            batch_eval[strategy] = res
 
-        # ----------------------------------------------------
-        # label assignment
-        # ----------------------------------------------------
+        # ---- labeling (PRIORITY-BASED) ----
         for i in range(len(batch)):
-            scores = {s: batch_scores[s][i] for s in STRATEGY_TO_LABEL}
+            correct_flags = {}
 
-            best = _best_strategy(scores)
+            for strategy in STRATEGY_TO_LABEL:
+                f1 = batch_eval[strategy]["f1"][i]
+                em = batch_eval[strategy]["em"][i]
 
-            label_counts[best] += 1
-            oracle_scores.append(max(scores.values()))
+                pred = getattr(predictions, strategy.replace("-", "_"))[start + i].prediction
+                gold = golds[i]
+
+                correct_flags[strategy] = is_correct(pred, gold, f1, em)
+
+            # ---- apply priority ----
+            label_name = None
+            for s in STRATEGY_PRIORITY:
+                if correct_flags[s]:
+                    label_name = s
+                    break
+
+            if label_name is None:
+                unlabeled_count += 1
+                label_name = "no-rag"  # fallback (can change)
+
+            label_counts[label_name] += 1
+
+            oracle_scores.append(
+                max(batch_eval[s]["f1"][i] for s in STRATEGY_TO_LABEL)
+            )
 
             results.append({
                 "id": ids[i],
                 "question": questions[i],
                 "gold": golds[i],
-                "label": STRATEGY_TO_LABEL[best],
-                "label_name": best,
-                "scores": scores,
+                "label": STRATEGY_TO_LABEL[label_name],
+                "label_name": label_name,
+                "correct": correct_flags,
             })
 
-    # --------------------------------------------------------
+    # -----------------------------
     # stats
-    # --------------------------------------------------------
+    # -----------------------------
     stats = {
         "total": total,
+        "unlabeled": unlabeled_count,
         "strategy_metrics": {},
         "label_distribution": {},
-        "oracle_mean": mean(oracle_scores),
+        "oracle_f1": mean(oracle_scores),
     }
 
     for s in STRATEGY_TO_LABEL:
         stats["strategy_metrics"][s] = {
-            "em": mean(strategy_em[s]),
-            "f1": mean(strategy_f1[s]),
-            "combined": mean(strategy_combined[s]),
+            "f1": mean(strategy_metrics[s]["f1"]),
+            "em": mean(strategy_metrics[s]["em"]),
+            "acc": mean(strategy_metrics[s]["acc"]),
         }
 
     for s, c in label_counts.items():
@@ -143,33 +137,32 @@ def main():
             "pct": c / total,
         }
 
-    # --------------------------------------------------------
+    # -----------------------------
     # save
-    # --------------------------------------------------------
+    # -----------------------------
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with output_path.open("w", encoding="utf-8") as f:
+    with output_path.open("w") as f:
         json.dump(results, f, indent=2)
 
-    with stats_path.open("w", encoding="utf-8") as f:
+    with stats_path.open("w") as f:
         json.dump(stats, f, indent=2)
 
-    # --------------------------------------------------------
-    # print summary
-    # --------------------------------------------------------
+    # -----------------------------
+    # print
+    # -----------------------------
     print("\n=== Strategy Metrics ===")
     for s, m in stats["strategy_metrics"].items():
-        print(f"{s:8s} | EM: {m['em']:.4f} | F1: {m['f1']:.4f} | Combined: {m['combined']:.4f}")
+        print(f"{s:8s} | F1: {m['f1']:.4f} | EM: {m['em']:.4f} | Acc: {m['acc']:.4f}")
 
     print("\n=== Label Distribution ===")
     for s, d in stats["label_distribution"].items():
         print(f"{s:8s} | {d['count']} ({d['pct']:.2%})")
 
-    print("\n=== Oracle ===")
-    print(f"{stats['oracle_mean']:.4f}")
+    print("\n=== Oracle F1 ===")
+    print(f"{stats['oracle_f1']:.4f}")
 
-    print(f"\nSaved: {output_path}")
-    print(f"Saved: {stats_path}")
+    print(f"\nUnlabeled: {unlabeled_count}")
 
 
 if __name__ == "__main__":

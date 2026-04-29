@@ -34,9 +34,12 @@ def main():
     parser.add_argument("--config", default="config.yaml", help="Path to evaluation config")
     args = parser.parse_args()
 
+    paths = load_yaml_config(args.config, section="paths")
     config = load_yaml_config(args.config, section="evaluate")
-    predictions_path = str(config["predictions"])
-    references_path = str(config["references"])
+
+    prediction_path_key = config.get("prediction_path_key", "predictions_multi")
+    predictions_path = str(paths[prediction_path_key])
+    references_path = str(paths["validation_data"])
 
     # references -> List[QAItem]
     references = load_records(references_path)
