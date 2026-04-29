@@ -1,0 +1,12 @@
+wandb
+vllm
+faiss-cpu
+datasets
+numpy
+pytorch-lightning
+pyyaml
+sentence-transformers
+torch
+tqdm
+transformers
+pydantic

@@ -1,0 +1,34 @@
+# grading/traceability.yaml
+#
+# Maps every user story to its spec section, its source modules, and its tests.
+# The grading script reads this file directly. Every story ID in
+# docs/STORIES.md must appear here exactly once.
+
+- story_id: US-01
+  spec_section: "4.1 HTTP API and 4.2 Python interfaces"
+  source_modules:
+    - src/myproject/api.py
+    - src/myproject/router.py
+    - src/myproject/retriever.py
+    - src/myproject/generator.py
+  tests:
+    - tests/user_stories/test_us_01.py
+    - tests/integration/test_query_pipeline.py
+
+- story_id: US-02
+  spec_section: "4.1 HTTP API (error response)"
+  source_modules:
+    - src/myproject/api.py
+  tests:
+    - tests/user_stories/test_us_02.py
+    - tests/edge/test_empty_input.py
+
+- story_id: US-03
+  spec_section: "6 Configuration"
+  source_modules:
+    - src/myproject/api.py
+    - src/myproject/generator.py
+  tests:
+    - tests/user_stories/test_us_03.py
+
+# Add one entry per story in docs/STORIES.md

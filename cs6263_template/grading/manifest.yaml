@@ -1,0 +1,32 @@
+# grading/manifest.yaml
+#
+# Pinned environment manifest. The grading script reads this to identify the
+# exact configuration that produced the reported numbers. Update this file
+# every time you change a pinned version.
+
+python_version: "3.11.9"
+
+# Random seed used throughout the application. Code must read this seed and
+# pass it to numpy, torch, random, and any other source of randomness.
+seed: 42
+
+# Models used by the application. Pin by ID and revision/version.
+model_ids:
+  - provider: anthropic
+    model: claude-opus-4-5-20251101
+    purpose: question answering
+  - provider: huggingface
+    model: sentence-transformers/all-MiniLM-L6-v2
+    revision: e4ce9877abf3edfe10b0d82785e83bdcb973e22e
+    purpose: query embedding
+
+# Datasets pinned by version or sha256.
+dataset_versions:
+  - name: nist_csrc_pubs
+    version: "2024-09-01"
+    sha256: "<replace with computed sha256>"
+
+# Commit hash the team intends the TA to grade. The grading script picks this
+# up; if missing or stale, the TA grades the latest commit on main as of the
+# deadline. Update this on the final commit before pushing.
+commit_sha: ""
