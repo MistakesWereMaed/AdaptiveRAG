@@ -9,10 +9,9 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 
-from cs6263_template.src.myproject.src.classifier.datamodule import RouterDataModule
-from cs6263_template.src.myproject.src.classifier.lightning_module import RouterLightningModule
-from cs6263_template.src.myproject.src.data.file_loader import load_yaml_config
-from src.utils.distributed import is_distributed, is_main_process
+from src.classifier.datamodule import RouterDataModule
+from src.classifier.lightning_module import RouterLightningModule
+from src.data.file_loader import load_yaml_config
 
 
 def main():

@@ -5,7 +5,7 @@ import torch
 import torch.nn.functional as F
 from torch.optim import AdamW
 
-from .model import RouterClassifier
+from src.classifier.model import RouterClassifier
 
 
 class RouterLightningModule(pl.LightningModule):

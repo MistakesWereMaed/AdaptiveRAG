@@ -2,7 +2,7 @@ from typing import Any
 
 import torch
 
-from cs6263_template.src.myproject.src.rag.pipeline import AdaptiveRAGPipeline
+from src.rag.pipeline import AdaptiveRAGPipeline
 
 
 def _to_int(strategy: Any) -> int:

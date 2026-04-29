@@ -6,7 +6,7 @@ from typing import Any, Dict, Iterable, List, Optional, Union
 
 from tqdm.auto import tqdm
 
-from cs6263_template.src.myproject.src.data.schemas import QAItem, PredictionItem, StrategyPredictions
+from src.data.schemas import QAItem, PredictionItem, RetrievedDocument, StrategyPredictions
 
 STRATEGIES = ("no-rag", "single", "multi")
 
@@ -44,6 +44,7 @@ def load_records(path: Union[str, Path]) -> List[QAItem]:
 
 	- Enforces presence of `question` and `answer` (coerced to `gold`)
 	- Coerces/assigns `id` when safe
+	- Extracts metadata including supporting_titles
 	"""
 	print(f"[preprocessing] Loading dataset from {path}", flush=True)
 	source_path = Path(path)
@@ -71,7 +72,13 @@ def load_records(path: Union[str, Path]) -> List[QAItem]:
 			except Exception:
 				item_id = i
 
-			examples.append(QAItem(id=item_id, question=q, gold=a))
+			# Extract metadata, particularly supporting_titles
+			metadata = {}
+			supporting_titles = record.get("supporting_titles")
+			if supporting_titles:
+				metadata["supporting_titles"] = supporting_titles
+			
+			examples.append(QAItem(id=item_id, question=q, gold=a, metadata=metadata))
 
 		elif isinstance(record, str) and record.strip():
 			examples.append(QAItem(id=i, question=record.strip(), gold=""))
@@ -175,6 +182,61 @@ def extract_documents(records: Iterable[Any]) -> List[str]:
 					break
 		elif isinstance(record, str) and record.strip():
 			documents.append(record.strip())
+	return documents
+
+
+def extract_structured_documents(records: Iterable[Any]) -> List[RetrievedDocument]:
+	print("[preprocessing] Extracting structured documents", flush=True)
+	documents: List[RetrievedDocument] = []
+	for index, record in enumerate(tqdm(records, desc="Extracting documents", unit="record")):
+		if isinstance(record, RetrievedDocument):
+			documents.append(record)
+			continue
+
+		if isinstance(record, str):
+			text = record.strip()
+			if text:
+				documents.append(
+					RetrievedDocument(
+						doc_id=f"doc_{index}",
+						title="",
+						text=text,
+						source="corpus",
+					)
+				)
+			continue
+
+		if isinstance(record, dict):
+			raw_text = None
+			for key in ("text", "content", "passage", "document", "context"):
+				value = record.get(key)
+				if isinstance(value, str) and value.strip():
+					raw_text = value.strip()
+					break
+
+			if raw_text is None:
+				continue
+
+			raw_title = record.get("title") or record.get("name") or record.get("doc_title") or ""
+			title = str(raw_title).strip() if raw_title is not None else ""
+			raw_doc_id = record.get("doc_id") or record.get("id") or record.get("_id") or f"doc_{index}"
+			doc_id = str(raw_doc_id).strip() if raw_doc_id is not None else f"doc_{index}"
+
+			metadata = dict(record.get("metadata") or {})
+			for key, value in record.items():
+				if key not in {"doc_id", "id", "_id", "title", "name", "doc_title", "text", "content", "passage", "document", "context", "metadata", "score", "rank", "source"}:
+					metadata.setdefault(key, value)
+
+			documents.append(
+				RetrievedDocument(
+					doc_id=doc_id,
+					title=title,
+					text=raw_text,
+					source=str(record.get("source") or "corpus"),
+					metadata=metadata,
+				)
+			)
+
 	return documents
 
 

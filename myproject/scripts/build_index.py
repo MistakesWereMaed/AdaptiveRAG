@@ -4,8 +4,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from cs6263_template.src.myproject.src.data.file_loader import extract_documents, load_raw_records, load_yaml_config
-from cs6263_template.src.myproject.src.rag.retriever import FaissIVFRetriever
+from src.data.file_loader import extract_structured_documents, load_raw_records, load_yaml_config
+from src.rag.retriever import FaissIVFRetriever
 
 
 def main():
@@ -22,7 +22,7 @@ def main():
 
     print(f"[build_index] Loading corpus from {corpus_path}", flush=True)
     records = load_raw_records(corpus_path)
-    documents = extract_documents(records)
+    documents = extract_structured_documents(records)
     print(f"[build_index] Building index for {len(documents)} documents", flush=True)
 
     index = FaissIVFRetriever(encoder_name=encoder_name)

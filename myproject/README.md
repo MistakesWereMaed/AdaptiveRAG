@@ -10,7 +10,7 @@ Adaptive RAG dynamically routes question answering requests between three strate
 
 The repository is organized around a simple end-to-end flow:
 
-- build a Qdrant-backed retrieval index from a corpus
+- build dense FAISS retrieval index from a corpus
 - generate weak labels by comparing the three strategies against ground-truth answers
 - train a router classifier on the labeled questions
 - run the router at inference time to choose the best answering strategy
@@ -34,28 +34,27 @@ Across open-domain QA benchmarks (single-hop and multi-hop), the paper reports t
 
 ## What This Repository Implements
 
-This codebase implements the main Adaptive-RAG pipeline described above:
+This codebase implements the Adaptive-RAG pipeline described in the refactor plan:
 
 1. Three QA strategies in one pipeline:
   - no retrieval
   - single-step retrieval
   - multi-step retrieval
-2. Weak-label generation by running all strategies and scoring outputs against references.
-3. A router/classifier trained on those labels to predict strategy choice.
-4. Retrieval with sentence-transformers + Qdrant.
-5. LLM inference powered by vLLM (continuous batching and KV-cache management handled by backend).
-6. Single-process and python-launched multi-process dataset sharding for RAG pipeline runs (`--num-procs`, no `torchrun` required).
+2. Structured dense FAISS retrieval with sentence-transformer embeddings.
+3. Title-aware context formatting for retrieval-augmented prompting.
+4. Retrieval diagnostics that can be run without generation.
+5. Weak-label generation and router training on top of the strategy outputs.
+6. Streaming inference with per-query execution traces.
 
-In short, the repository operationalizes the paper’s adaptive routing concept end-to-end: generate labels -> train complexity router -> route each query to the most suitable RAG strategy.
+In short, the repository operationalizes the adaptive routing concept end-to-end: build the index, evaluate retrieval, generate predictions, label strategies, train the router, then evaluate adaptively.
 
 ## Layout
 
-- `configs/` holds YAML configuration stubs for model, retriever, and training settings
 - `src/` contains the reusable library code
-- `scripts/` contains command-line entry points for indexing, labeling, training, and evaluation
-- `outputs/` is the default location for generated artifacts
+- `scripts/` contains command-line entry points for indexing, diagnostics, labeling, training, and evaluation
+- `data/` is the default location for prepared datasets and generated artifacts
 
-`LocalLLM` defaults are defined in `configs/llm.yaml` and are vLLM-specific.
+The current retrieval stack is organized around `myproject.src.rag` and uses the structured document model introduced in the refactor.
 
 ## Setup
 
@@ -103,31 +102,9 @@ Generated prediction files are keyed by `id` and contain model outputs separatel
 
 ## Streaming Inference
 
-As of the latest refactor, inference is **streaming and instrumented**:
+Inference is streamed to JSONL so results are written incrementally instead of accumulating in memory. Each prediction record includes execution traces, retrieval count, LLM call count, latency, and the retrieved context used for the answer.
 
-- Results are written to disk incrementally (JSONL format) instead of accumulating in memory
-- Each record includes execution traces: retrieval count, LLM call count, latency
-- Metrics are aggregated per strategy and saved to `*_stats.json`
-- Memory usage no longer scales with dataset size
-- Results are safe for process interruption
-
-See [STREAMING_REFACTOR.md](STREAMING_REFACTOR.md) for detailed documentation.
-
-### Validation
-
-After inference, validate output correctness:
-
-```bash
-python scripts/validate_streaming.py data/hotpotqa/train.jsonl outputs
-```
-
-Checks:
-- JSONL format correctness
-- Metrics aggregation accuracy
-- Output completeness and consistency
-- Dataset ordering and ID alignment
-
-Retrieval corpora can use `text`, `content`, `passage`, or `document` fields. Plain text files with one document per line are also supported in the indexing script.
+Retrieval corpora can use `title`, `text`, `content`, `passage`, `document`, or `context` fields. Plain text files with one document per line are still supported by the indexing script.
 
 ## Script Reference
 
@@ -136,35 +113,27 @@ This section describes what each script does and where it fits in the workflow.
 1. `scripts/prepare_hotpotqa.py`
 - Purpose: Downloads and preprocesses HotpotQA into local JSONL files.
 - Main outputs: `data/hotpotqa/train.jsonl`, `data/hotpotqa/validation.jsonl`, and optional `data/hotpotqa/corpus.jsonl`.
-- Run when: First step, or whenever you want to refresh local dataset files.
 
 2. `scripts/build_index.py`
-- Purpose: Builds a Qdrant retrieval collection from your corpus and saves index metadata.
-- Main outputs: `documents.json` in the configured output directory and local Qdrant storage under `.qdrant_db`.
-- Run when: After preparing corpus data; rerun only if corpus or embedding model changes.
+- Purpose: Builds the dense FAISS retrieval index and stores structured document metadata.
+- Main outputs: `data/index/index.faiss` and `data/index/documents.json`.
 
-3. `scripts/run_rag_pipelines.py`
-- Purpose: Runs the QA pipeline with strategy `no`, `single`, `multi`, or `all`.
-- Main outputs: Prediction JSON for selected strategy/strategies.
-- Special behavior: Requires a prebuilt index configured in `configs/pipeline.yaml` (the directory must contain `documents.json`); exits with an error if missing.
-- Parallel behavior: Supports python-based local sharding driven by `num_procs` in `configs/pipeline.yaml` (no `torchrun` needed).
-- Inference backend: Uses vLLM via `src/llm.py`; internal batching/caching is handled by vLLM.
-- Run when: To generate answers/predictions for train/dev/test questions.
+3. `scripts/evaluate_retrieval.py`
+- Purpose: Evaluates retrieval quality without invoking the LLM.
+- Main outputs: retrieval metrics JSON plus per-example JSONL diagnostics.
 
-4. `scripts/generate_labels.py`
+4. `scripts/generate_responses.py`
+- Purpose: Runs the QA pipeline with `no-rag`, `single`, or `multi` strategies.
+- Main outputs: streaming prediction JSONL and per-strategy stats files.
+
+5. `scripts/generate_labels.py`
 - Purpose: Creates weak supervision labels for router training by scoring the output of each strategy.
-- Main outputs: Labeled training JSON (e.g., `outputs/labeled_train.json`).
-- Run when: Before training the classifier/router.
 
-5. `scripts/train_classifier.py`
+6. `scripts/train_classifier.py`
 - Purpose: Trains the query-complexity router/classifier from config-controlled training settings.
-- Main outputs: Trained checkpoint(s) and training logs.
-- Run when: After weak labels are generated.
 
-6. `scripts/evaluate.py`
-- Purpose: Computes evaluation metrics (EM/F1) from predictions and reference answers.
-- Main outputs: Printed metrics summary.
-- Run when: After inference to compare model variants and settings.
+7. `scripts/evaluate.py`
+- Purpose: Computes answer metrics such as EM/F1 from predictions and reference answers.
 
 ## Ordered Commands
 
@@ -174,13 +143,19 @@ This section describes what each script does and where it fits in the workflow.
 python -m scripts.prepare_hotpotqa
 ```
 
-### 2) Build retrieval index (one-time, reusable)
+### 2) Build dense retrieval index (one-time, reusable)
 
 ```bash
 python -m scripts.build_index
 ```
 
-### 3) Run RAG pipelines to produce predictions
+### 3) Evaluate retrieval quality
+
+```bash
+python -m scripts.evaluate_retrieval --retriever dense --output experiments/retrieval_eval/dense_metrics.json
+```
+
+### 4) Run RAG pipelines to produce predictions
 
 ```bash
 python -m scripts.generate_responses
@@ -192,7 +167,7 @@ Index reuse behavior:
 - If the index is missing, the script exits with a clear error.
 - Build (or rebuild) the index first with `python -m scripts.build_index`.
 
-### 4) Generate weak labels (required before classifier training)
+### 6) Generate weak labels (required before classifier training)
 
 Label generation uses all three RAG strategies and scores each result against the ground truth answer.
 
@@ -200,14 +175,14 @@ Label generation uses all three RAG strategies and scores each result against th
 python -m scripts.generate_labels
 ```
 
-### 5) Train router classifier
+### 7) Train router classifier
 
 
 ```bash
 python -m scripts.train_classifier
 ```
 
-### 6) Evaluate predictions
+### 8) Evaluate predictions
 
 ```bash
 python -m scripts.evaluate

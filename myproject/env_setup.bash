@@ -31,15 +31,15 @@ echo "Installing vLLM via uv"
 echo "======================================"
 
 # Install vLLM FIRST (important for dependency resolution)
-uv pip install vllm --torch-backend=cu121 --no-build-isolation
+uv pip install vllm --torch-backend=cu121 --no-build-isolation --no-deps
 
 echo "======================================"
 echo "Installing project requirements"
 echo "======================================"
 
 # Install your requirements
-if [ -f ../../requirements.txt ]; then
-    uv pip install -r ../../requirements.txt
+if [ -f requirements.txt ]; then
+    uv pip install -r requirements.txt
 else
     echo "WARNING: requirements.txt not found, skipping."
 fi

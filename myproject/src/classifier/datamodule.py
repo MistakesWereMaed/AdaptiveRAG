@@ -6,8 +6,8 @@ import torch
 from torch.utils.data import DataLoader, Dataset, random_split
 from transformers import AutoTokenizer
 
-from cs6263_template.src.myproject.src.data.file_loader import load_records
-from cs6263_template.src.myproject.src.data.schemas import QAItem
+from src.data.file_loader import load_records
+from src.data.schemas import QAItem
 
 
 class RouterDataset(Dataset):

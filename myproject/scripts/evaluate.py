@@ -7,7 +7,7 @@ from tqdm.auto import tqdm
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from cs6263_template.src.myproject.src.data.file_loader import load_records, load_single_predictions, normalize_text, load_yaml_config
+from src.data.file_loader import load_records, load_single_predictions, normalize_text, load_yaml_config
 
 
 def exact_match(prediction: str, reference: str) -> float:

@@ -1,11 +1,12 @@
 import json
 from pathlib import Path
-from typing import List, Sequence, Optional, Union, Dict, Tuple
+from typing import Any, List, Sequence, Optional, Union, Dict, Tuple, Iterable
 
 import numpy as np
 import faiss
 from sentence_transformers import SentenceTransformer
-from cs6263_template.src.myproject.src.rag.trace import ExecutionTrace
+from src.data.schemas import RetrievedDocument
+from src.rag.trace import ExecutionTrace
 
 
 class FaissIVFRetriever:
@@ -19,7 +20,7 @@ class FaissIVFRetriever:
         self.encoder = SentenceTransformer(encoder_name)
 
         self.index = None
-        self.documents: List[str] = []
+        self.documents: List[RetrievedDocument] = []
         self.dim = None
 
         self.nprobe = nprobe
@@ -32,19 +33,71 @@ class FaissIVFRetriever:
     # --------------------------------------------------
     # Document preprocessing
     # --------------------------------------------------
-    def _deduplicate(self, docs: Sequence[str]) -> List[str]:
+    def _doc_key(self, doc: RetrievedDocument) -> str:
+        if doc.doc_id:
+            return doc.doc_id
+        return f"{doc.title.strip()}::{doc.text.strip()[:100]}"
+
+    def _coerce_document(self, doc: Any, position: int) -> RetrievedDocument:
+        if isinstance(doc, RetrievedDocument):
+            if not doc.doc_id:
+                doc.doc_id = f"doc_{position}"
+            return doc
+
+        if isinstance(doc, str):
+            return RetrievedDocument(doc_id=f"doc_{position}", title="", text=doc.strip(), source="corpus")
+
+        if isinstance(doc, dict):
+            raw_text = None
+            for key in ("text", "content", "passage", "document", "context"):
+                value = doc.get(key)
+                if isinstance(value, str) and value.strip():
+                    raw_text = value.strip()
+                    break
+
+            if raw_text is None:
+                raise ValueError("Document is missing text content")
+
+            raw_doc_id = doc.get("doc_id") or doc.get("id") or doc.get("_id") or f"doc_{position}"
+            raw_title = doc.get("title") or doc.get("name") or doc.get("doc_title") or ""
+            metadata = dict(doc.get("metadata") or {})
+            for key, value in doc.items():
+                if key not in {"doc_id", "id", "_id", "title", "name", "doc_title", "text", "content", "passage", "document", "context", "metadata", "score", "rank", "source"}:
+                    metadata.setdefault(key, value)
+
+            return RetrievedDocument(
+                doc_id=str(raw_doc_id).strip(),
+                title=str(raw_title).strip(),
+                text=raw_text,
+                score=doc.get("score"),
+                rank=doc.get("rank"),
+                source=str(doc.get("source") or "corpus"),
+                metadata=metadata,
+            )
+
+        raise TypeError(f"Unsupported document type: {type(doc)!r}")
+
+    def _deduplicate(self, docs: Sequence[Any]) -> List[RetrievedDocument]:
         seen = set()
         out = []
-        for d in docs:
-            if d and d not in seen:
-                out.append(d)
-                seen.add(d)
+        for position, raw_doc in enumerate(docs):
+            doc = self._coerce_document(raw_doc, position)
+            key = self._doc_key(doc)
+            if key and key not in seen:
+                out.append(doc)
+                seen.add(key)
         return out
 
     # --------------------------------------------------
     # Build index
     # --------------------------------------------------
-    def build(self, documents: Sequence[str], batch_size: int = 1024):
+    def _index_text(self, doc: RetrievedDocument) -> str:
+        title = doc.title.strip()
+        if title:
+            return f"{title}. {doc.text.strip()}"
+        return doc.text.strip()
+
+    def build(self, documents: Sequence[Any], batch_size: int = 1024):
 
         self.documents = self._deduplicate(documents)
 
@@ -54,7 +107,7 @@ class FaissIVFRetriever:
         print(f"[FAISS] Encoding {len(self.documents)} documents")
 
         embeddings = self.encoder.encode(
-            self.documents,
+            [self._index_text(doc) for doc in self.documents],
             convert_to_numpy=True,
             batch_size=batch_size,
             show_progress_bar=True,
@@ -175,23 +228,51 @@ class FaissIVFRetriever:
         # -------------------------
         D, I = self.index.search(q_emb, k)
 
-        # -------------------------
-        # vectorized extraction (FASTER FIX)
-        # -------------------------
-        docs_arr = np.array(self.documents, dtype=object)
-        retrieved_docs = docs_arr[I]
-
         results = []
 
         for i in range(len(queries)):
 
-            docs = retrieved_docs[i].tolist()
-            scores = D[i]
+            docs = []
+            scores = []
+            for doc_index, score in zip(I[i].tolist(), D[i].tolist()):
+                if doc_index < 0 or doc_index >= len(self.documents):
+                    continue
+                docs.append(self.documents[doc_index])
+                scores.append(score)
 
             if return_scores:
-                results.append(list(zip(docs, scores)))
+                result_docs = []
+                for rank, (doc, score) in enumerate(zip(docs, scores), start=1):
+                    result_docs.append(
+                        (
+                            RetrievedDocument(
+                                doc_id=doc.doc_id,
+                                title=doc.title,
+                                text=doc.text,
+                                score=float(score),
+                                rank=rank,
+                                source=doc.source or "dense",
+                                metadata=dict(doc.metadata),
+                            ),
+                            float(score),
+                        )
+                    )
+                results.append(result_docs)
             else:
-                results.append(docs)
+                result_docs = []
+                for rank, (doc, score) in enumerate(zip(docs, scores), start=1):
+                    result_docs.append(
+                        RetrievedDocument(
+                            doc_id=doc.doc_id,
+                            title=doc.title,
+                            text=doc.text,
+                            score=float(score),
+                            rank=rank,
+                            source=doc.source or "dense",
+                            metadata=dict(doc.metadata),
+                        )
+                    )
+                results.append(result_docs)
 
         return results
 
@@ -204,16 +285,18 @@ class FaissIVFRetriever:
 
         faiss.write_index(self.index, str(path / "index.faiss"))
 
-        with open(path / "documents.json", "w") as f:
-            json.dump(self.documents, f)
+        with open(path / "documents.json", "w", encoding="utf-8") as f:
+            json.dump([doc.model_dump() for doc in self.documents], f, ensure_ascii=False, indent=2)
 
     def load(self, path: str):
         path = Path(path)
 
         self.index = faiss.read_index(str(path / "index.faiss"))
 
-        with open(path / "documents.json", "r") as f:
-            self.documents = json.load(f)
+        with open(path / "documents.json", "r", encoding="utf-8") as f:
+            loaded_documents = json.load(f)
+
+        self.documents = self._deduplicate(loaded_documents)
 
         self.dim = self.index.d
 
