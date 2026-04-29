@@ -1,32 +1,42 @@
-# Secrets
-.env
-
 # Python
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*.so
 .pytest_cache/
-.ruff_cache/
 .mypy_cache/
-.coverage
-htmlcov/
-*.egg-info/
+.ruff_cache/
+.qdrant_db/
+.venv/
+venv/
+env/
+
+# Build and packaging
 build/
 dist/
+*.egg-info/
 
-# Data and models (must be downloaded, never committed)
-data/
-models/
+# Notebook checkpoints
+.ipynb_checkpoints/
 
-# Generated artifacts
-regenerated/
-reports/coverage_html/
+# Local environment and secrets
+.env
+.env.*
 
-# IDE
-.vscode/
-.idea/
-*.swp
+# Model and experiment artifacts
+wandb/
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.safetensors
+*.json
+*.jsonl
 
-# OS
+# Retrieval and cache files
+cache.json
+*.faiss
+*.index
+
+# OS files
 .DS_Store
 Thumbs.db

@@ -10,3 +10,16 @@ black==24.4.2
 mypy==1.10.0
 locust==2.27.0
 pip-audit==2.7.3
+
+wandb
+vllm
+faiss-cpu
+datasets
+numpy
+pytorch-lightning
+pyyaml
+sentence-transformers
+torch
+tqdm
+transformers
+pydantic
