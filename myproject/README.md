@@ -183,6 +183,7 @@ python -m src.generate_labels.main
 
 ```bash
 python -m src.train_router.main
+torchrun -m src.train_router.main
 ```
 
 ### 8) Evaluate predictions

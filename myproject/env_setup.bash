@@ -4,7 +4,6 @@ set -e  # exit on error
 
 ENV_NAME="adaptive-rag"
 PYTHON_VERSION="3.10"
-export UV_CACHE_DIR=$CONDA_PREFIX/.uv_cache
 
 echo "======================================"
 echo "Creating conda environment: $ENV_NAME"
@@ -22,7 +21,6 @@ echo "Installing uv"
 echo "======================================"
 
 # Install uv (inside env)
-pip install --upgrade pip
 pip install uv
 uv pip install cmake
 

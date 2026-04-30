@@ -24,8 +24,8 @@ paths:
   predictions_no_rag: &predictions_no_rag data/predictions/predictions-no-rag.jsonl
   predictions_single: &predictions_single data/predictions/predictions-single.jsonl
   predictions_multi: &predictions_multi data/predictions/predictions-multi.jsonl
-  train_data_labeled: &labeled_train data/labeled/labeled_train.json
-  validation_data_labeled: &labeled_validation data/labeled/labeled_validation.json
+  labeled_train: &labeled_train data/labeled/labeled_train.json
+  labeled_validation: &labeled_validation data/labeled/labeled_validation.json
   labeled_stats: &labeled_stats data/labeled/labeled_train.stats.json
 
 # -------------------------
@@ -90,25 +90,34 @@ labels:
 # Model / classifier training
 # -------------------------
 model:
-  model_name: bert-base-uncased
+  model_name: distilbert-base-uncased
   num_classes: 3
   dropout: 0.1
-  learning_rate: 2e-5
+  learning_rate: 1e-5
+  weight_decay: 0.01
   max_length: 256
 
 # -------------------------
 # Training / experiment
 # -------------------------
 train:
-  model_name: microsoft/deberta-v3-base
-  batch_size: 32
-  max_epochs: 3
+  batch_size: 16
+  max_epochs: 5
+  num_workers: 2
+  val_split: 0.1
+  seed: 42
   use_wandb: true
   strategy: auto
   devices: auto
   num_nodes: 1
-  precision: "fp16"
+  precision: "16-mixed"
   accelerator: auto
+  checkpoints_dir: checkpoints
+  early_stopping_patience: null
+  wandb_project: adaptive-rag
+  wandb_name: router
+  log_every_n_steps: 25
+  deterministic: false
   rebuild_index: false
   save_index: false
 

@@ -158,9 +158,14 @@ def run_cascaded_label_generation(
     final_k_multi = int(retriever_cfg.get("final_k_multi", multi_k))
     multi_steps = int((pipeline_cfg.get("multi", {}) or {}).get("steps", 2))
 
-    output_path = Path(paths["labeled_train"])
-    stats_path = Path(paths["labeled_stats"])
-    prediction_base = Path(paths["predictions_base"])
+    if split == "validation":
+        output_path = Path(paths["labeled_validation"])
+        stats_path = Path(paths["labeled_validation_stats"])
+        prediction_base = Path(paths["validation_predictions_base"])
+    else:
+        output_path = Path(paths["labeled_train"])
+        stats_path = Path(paths["labeled_stats"])
+        prediction_base = Path(paths["predictions_base"])
 
     print(f"[cascade] Loaded {len(records)} records from {data_path}", flush=True)
     print("[cascade] Initializing LLM...", flush=True)

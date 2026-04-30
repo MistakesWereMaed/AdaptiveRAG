@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Dict
 
 import pytorch_lightning as pl
@@ -9,23 +11,39 @@ from src.train_router.classifier_model import RouterClassifier
 
 
 class RouterLightningModule(pl.LightningModule):
-    def __init__(self, model_name: str, num_classes: int = 3, learning_rate: float = 2e-5):
+    def __init__(
+        self,
+        model_name: str,
+        num_classes: int = 3,
+        learning_rate: float = 2e-5,
+        dropout: float = 0.1,
+        weight_decay: float = 0.01,
+    ):
         super().__init__()
-        print(f"[RouterLightningModule] Initializing model={model_name} lr={learning_rate}", flush=True)
+
         self.save_hyperparameters()
-        self.model = RouterClassifier(model_name=model_name, num_classes=num_classes)
+        self.model = RouterClassifier(
+            model_name=model_name,
+            num_classes=num_classes,
+            dropout=dropout,
+        )
 
     def forward(self, input_ids, attention_mask=None):
         return self.model(input_ids=input_ids, attention_mask=attention_mask)
 
     def _step(self, batch: Dict[str, torch.Tensor], prefix: str):
-        print(f"[RouterLightningModule] Running {prefix} step", flush=True)
-        logits = self.forward(batch["input_ids"], batch.get("attention_mask"))
+        logits = self.forward(
+            input_ids=batch["input_ids"],
+            attention_mask=batch.get("attention_mask"),
+        )
+
         loss = F.cross_entropy(logits, batch["labels"])
-        predictions = torch.argmax(logits, dim=-1)
-        accuracy = (predictions == batch["labels"]).float().mean()
-        self.log(f"{prefix}_loss", loss, prog_bar=(prefix != "train"), on_step=(prefix == "train"), on_epoch=True)
-        self.log(f"{prefix}_accuracy", accuracy, prog_bar=(prefix != "train"), on_step=False, on_epoch=True)
+        preds = torch.argmax(logits, dim=-1)
+        accuracy = (preds == batch["labels"]).float().mean()
+
+        self.log(f"{prefix}_loss", loss, prog_bar=(prefix == "val"), on_step=False, on_epoch=True, sync_dist=True)
+        self.log(f"{prefix}_accuracy", accuracy, prog_bar=True, on_step=False, on_epoch=True, sync_dist=True)
+
         return loss
 
     def training_step(self, batch, batch_idx):
@@ -35,4 +53,8 @@ class RouterLightningModule(pl.LightningModule):
         self._step(batch, "val")
 
     def configure_optimizers(self):
-        return AdamW(self.parameters(), lr=self.hparams.learning_rate)
+        return AdamW(
+            self.parameters(),
+            lr=float(self.hparams.learning_rate),
+            weight_decay=float(self.hparams.weight_decay),
+        )
