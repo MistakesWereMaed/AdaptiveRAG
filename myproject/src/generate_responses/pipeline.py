@@ -7,6 +7,44 @@ from typing import List, Sequence
 from src.schemas import RetrievedDocument
 from src.build_index.retriever import FaissIVFRetriever
 
+import re
+
+_STOP_PHRASES = {
+    "What", "Which", "Who", "Whom", "Whose", "When", "Where", "Were", "Was",
+    "Are", "Is", "Did", "Do", "Does", "The", "A", "An", "In", "On", "Of",
+}
+
+def extract_candidate_queries(question: str, max_queries: int = 2) -> list[str]:
+    # Captures quoted titles first.
+    quoted = re.findall(r'"([^"]+)"', question)
+
+    # Captures title-like spans: Scott Derrickson, Ed Wood, Big Stone Gap.
+    titled = re.findall(
+        r"\b(?:[A-Z][a-zA-Z0-9'’.-]+(?:\s+|$)){1,5}",
+        question,
+    )
+
+    candidates = []
+    for item in quoted + titled:
+        item = " ".join(item.split()).strip(" ?.,;:")
+        if not item:
+            continue
+
+        first = item.split()[0]
+        if first in _STOP_PHRASES:
+            continue
+
+        if len(item) < 3:
+            continue
+
+        if item not in candidates:
+            candidates.append(item)
+
+        if len(candidates) >= max_queries:
+            break
+
+    return candidates
+
 
 @dataclass
 class PipelineOutput:
@@ -17,9 +55,13 @@ class PipelineOutput:
     llm_calls: int
     latency_s: float
 
-def format_passage(doc: RetrievedDocument) -> str:
+def format_passage(doc, max_chars: int = 400) -> str:
     title = (doc.title or doc.doc_id or "").strip()
     text = doc.text.strip()
+
+    if len(text) > max_chars:
+        text = text[:max_chars].rsplit(" ", 1)[0]
+
     return f"Wikipedia Title: {title}\n{text}"
 
 
@@ -79,34 +121,41 @@ class AdaptiveRAGPipeline:
     ) -> List[PipelineOutput]:
         start = time.perf_counter()
 
-        query_batches = self.llm.generate_search_queries(
-            questions,
-            max_queries=max(1, steps),
-        )
+        flat_queries: List[str] = []
+        owners: List[int] = []
 
-        all_docs: List[List[RetrievedDocument]] = []
-        retrieval_counts: List[int] = []
-
-        for question, generated_queries in zip(questions, query_batches):
+        for i, question in enumerate(questions):
             queries = [question]
-            for query in generated_queries:
+            for query in extract_candidate_queries(question, max_queries=max(1, steps)):
                 if query and query not in queries:
                     queries.append(query)
 
-            docs: List[RetrievedDocument] = []
-            retrieval_count = 0
-
             for query in queries:
-                retrieved = self.retriever.retrieve([query], k=k)[0]
-                docs.extend(retrieved)
-                retrieval_count += len(retrieved)
+                flat_queries.append(query)
+                owners.append(i)
 
+        flat_results = self.retriever.retrieve(flat_queries, k=k)
+
+        grouped_docs: List[List[RetrievedDocument]] = [[] for _ in questions]
+        retrieval_counts = [0 for _ in questions]
+
+        for owner, docs in zip(owners, flat_results):
+            grouped_docs[owner].extend(docs)
+            retrieval_counts[owner] += len(docs)
+
+        all_docs = []
+        contexts = []
+
+        for docs in grouped_docs:
             selected = FaissIVFRetriever.deduplicate_documents(docs)[:final_k]
             all_docs.append(selected)
-            retrieval_counts.append(retrieval_count)
+            contexts.append(build_context(selected, max_docs=final_k))
 
-        contexts = [build_context(docs, max_docs=final_k) for docs in all_docs]
-        predictions = self.llm.answer(questions, contexts=contexts, strategy="cot")
+        predictions = self.llm.answer(
+            questions,
+            contexts=contexts,
+            strategy="cot",
+        )
 
         latency = (time.perf_counter() - start) / max(1, len(questions))
 
@@ -116,7 +165,7 @@ class AdaptiveRAGPipeline:
                 context=context,
                 retrieved_docs=docs,
                 retrieval_count=retrieval_count,
-                llm_calls=2,
+                llm_calls=1,
                 latency_s=latency,
             )
             for prediction, context, docs, retrieval_count in zip(

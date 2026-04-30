@@ -24,7 +24,8 @@ paths:
   predictions_no_rag: &predictions_no_rag data/predictions/predictions-no-rag.jsonl
   predictions_single: &predictions_single data/predictions/predictions-single.jsonl
   predictions_multi: &predictions_multi data/predictions/predictions-multi.jsonl
-  labeled_train: &labeled_train data/labeled/labeled_train.json
+  train_data_labeled: &labeled_train data/labeled/labeled_train.json
+  validation_data_labeled: &labeled_validation data/labeled/labeled_validation.json
   labeled_stats: &labeled_stats data/labeled/labeled_train.stats.json
 
 # -------------------------
@@ -44,7 +45,7 @@ llm:
   batch_size: 16
   max_input_length: 2048
   max_new_tokens: 32
-  cot_max_new_tokens: 128
+  cot_max_new_tokens: 64
   query_max_new_tokens: 48
   num_beams: 1
   do_sample: false
@@ -55,9 +56,9 @@ llm:
 # -------------------------
 retriever:
   encoder_name: BAAI/bge-base-en-v1.5
-  top_k_single: 6
-  top_k_multi: 6
-  final_k_multi: 6
+  top_k_single: 2
+  top_k_multi: 4
+  final_k_multi: 4
   # Index building parameters
   nlist: null  # Number of index clusters (optional, auto if null)
   nprobe: 8    # Number of clusters to probe during search
@@ -68,13 +69,13 @@ retriever:
 # Pipeline defaults
 # -------------------------
 pipeline:
-  strategy: single
+  strategy: multi
   pipeline_batch_size: 128
   multi:
     steps: 2
   # Data generation parameters
   split: train  # Which dataset split to use: train or validation
-  limit: null   # Max records to process (null for all)
+  limit: 1000   # Max records to process (null for all)
 
 # -------------------------
 # Label generation
@@ -82,7 +83,8 @@ pipeline:
 labels:
   batch_size: 64
   min_f1: 0.5
-  margin: 0.05
+  margin: 0.01
+  correct_threshold: 0.6
 
 # -------------------------
 # Model / classifier training
@@ -98,7 +100,8 @@ model:
 # Training / experiment
 # -------------------------
 train:
-  batch_size: 8
+  model_name: microsoft/deberta-v3-base
+  batch_size: 32
   max_epochs: 3
   use_wandb: true
   strategy: auto

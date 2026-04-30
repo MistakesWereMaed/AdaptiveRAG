@@ -101,8 +101,8 @@ class LocalLLM:
     @staticmethod
     def query_prompt(question: str) -> str:
         return (
-            "Generate short Wikipedia search queries for the following question.\n"
-            "Return one query per line.\n\n"
+            "Answer the following question with one short reasoning sentence.\n"
+            "Then write: So the answer is: [answer].\n\n"
             f"Q: {question}\n"
             "A:"
         )

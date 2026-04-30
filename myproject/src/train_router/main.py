@@ -14,8 +14,7 @@ def run_train_router(config_path: str = "config.yaml") -> None:
     config = load_yaml_config(config_path, section="train")
     model_cfg = load_yaml_config(config_path, section="model")
 
-    train_data = str(paths["train_data"])
-    model_name = str(config.get("model_name", model_cfg.get("model_name", "bert-base-uncased")))
+    model_name = str(config.get("model_name", model_cfg.get("model_name", "microsoft/deberta-v3-base")))
     batch_size = int(config["batch_size"])
     max_epochs = int(config["max_epochs"])
     learning_rate = float(config.get("learning_rate", model_cfg.get("learning_rate", 2e-5)))
@@ -25,13 +24,14 @@ def run_train_router(config_path: str = "config.yaml") -> None:
     num_nodes = int(config["num_nodes"])
     precision = config["precision"]
     accelerator = config["accelerator"]
-    val_data = str(paths["validation_data"])
+    train_data = str(paths["train_data_labeled"])
+    val_data = str(paths["validation_data_labeled"])
 
     torchrun_mode = is_distributed()
     if torchrun_mode:
         accelerator = "gpu"
         configured_strategy = "ddp"
-        configured_devices = 1
+        configured_devices = "auto"
 
     if isinstance(configured_devices, str) and configured_devices.isdigit():
         configured_devices = int(configured_devices)

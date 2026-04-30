@@ -4,6 +4,7 @@ import pytorch_lightning as pl
 import torch
 from torch.utils.data import DataLoader, Dataset, random_split
 from transformers import AutoTokenizer
+from pathlib import Path
 
 from myproject.src.file_loader import load_records
 from myproject.src.schemas import QAItem
