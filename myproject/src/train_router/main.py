@@ -1,5 +1,3 @@
-import argparse
-
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
@@ -82,10 +80,7 @@ def is_main_process() -> bool:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Train the router classifier")
-    parser.add_argument("--config", default="config.yaml", help="Path to training config")
-    args = parser.parse_args()
-    run_train_router(args.config)
+    run_train_router("config.yaml")
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Union
 
 from tqdm.auto import tqdm
-from myproject.src.schemas import QAItem, PredictionItem, RetrievedDocument, StrategyPredictions
+from src.schemas import QAItem, PredictionItem, RetrievedDocument, StrategyPredictions
 
 STRATEGIES = ("no-rag", "single", "multi")
 

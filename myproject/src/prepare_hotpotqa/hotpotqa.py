@@ -1,133 +1,101 @@
+from __future__ import annotations
+
+import json
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
-import json
+from datasets import load_dataset
 from tqdm.auto import tqdm
 
-from datasets import load_dataset
 
-
-def load_hotpotqa_split(split: str = "train", config_name: str = "distractor"):
+def load_hotpotqa_split(split: str, config_name: str = "distractor"):
+    """Load a HotpotQA split from Hugging Face."""
     return load_dataset("hotpot_qa", config_name, split=split)
 
 
-def hotpotqa_context_to_documents(context: Any) -> List[str]:
-    documents: List[str] = []
+def _join_sentences(sentences: Any) -> str:
+    """Join a HotpotQA sentence list into one paragraph string."""
+    if isinstance(sentences, str):
+        return sentences.strip()
 
-    if isinstance(context, str):
-        text = context.strip()
-        if text:
-            for segment in text.split("\n"):
-                segment = segment.strip()
-                if segment:
-                    documents.append(segment)
-        return documents
+    if isinstance(sentences, list):
+        return " ".join(str(s).strip() for s in sentences if str(s).strip())
 
-    if isinstance(context, dict):
-        for key in ("sentences", "paragraphs", "documents", "passages"):
-            value = context.get(key)
-            if isinstance(value, list):
-                for item in value:
-                    documents.extend(hotpotqa_context_to_documents(item))
-        return documents
-
-    if isinstance(context, list):
-        for entry in context:
-            if isinstance(entry, (list, tuple)) and len(entry) == 2:
-                title, sentences = entry
-                title_text = title.strip() if isinstance(title, str) else ""
-                if isinstance(sentences, list):
-                    for sentence in sentences:
-                        if isinstance(sentence, str) and sentence.strip():
-                            if title_text:
-                                documents.append(f"{title_text}: {sentence.strip()}")
-                            else:
-                                documents.append(sentence.strip())
-                elif isinstance(sentences, str) and sentences.strip():
-                    if title_text:
-                        documents.append(f"{title_text}: {sentences.strip()}")
-                    else:
-                        documents.append(sentences.strip())
-                elif title_text:
-                    documents.append(title_text)
-            elif isinstance(entry, str) and entry.strip():
-                documents.append(entry.strip())
-
-    return documents
+    return ""
 
 
-def hotpotqa_context_to_structured_documents(context: Any) -> List[Dict[str, Any]]:
-    documents: List[Dict[str, Any]] = []
+def context_to_documents(context: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Convert Hugging Face HotpotQA context into title-aware paragraph docs.
 
-    if isinstance(context, str):
-        text = context.strip()
-        if text:
-            for segment in text.split("\n"):
-                segment = segment.strip()
-                if segment:
-                    documents.append({"title": "", "text": segment})
-        return documents
+    Expected HF schema:
+        context = {
+            "title": [title_1, title_2, ...],
+            "sentences": [[sent_1, sent_2, ...], ...]
+        }
+    """
+    titles = context.get("title", [])
+    sentence_groups = context.get("sentences", [])
 
-    if isinstance(context, dict):
-        for key in ("sentences", "paragraphs", "documents", "passages"):
-            value = context.get(key)
-            if isinstance(value, list):
-                for item in value:
-                    documents.extend(hotpotqa_context_to_structured_documents(item))
-        return documents
+    docs: List[Dict[str, Any]] = []
+    for idx, (title, sentences) in enumerate(zip(titles, sentence_groups)):
+        text = _join_sentences(sentences)
+        if not text:
+            continue
 
-    if isinstance(context, list):
-        for entry in context:
-            if isinstance(entry, (list, tuple)) and len(entry) == 2:
-                title, sentences = entry
-                title_text = title.strip() if isinstance(title, str) else ""
-                if isinstance(sentences, list):
-                    for sentence in sentences:
-                        if isinstance(sentence, str) and sentence.strip():
-                            documents.append({"title": title_text, "text": sentence.strip()})
-                elif isinstance(sentences, str) and sentences.strip():
-                    documents.append({"title": title_text, "text": sentences.strip()})
-                elif title_text:
-                    documents.append({"title": title_text, "text": ""})
-            elif isinstance(entry, str) and entry.strip():
-                documents.append({"title": "", "text": entry.strip()})
+        docs.append(
+            {
+                "title": str(title).strip(),
+                "text": text,
+                "paragraph_index": idx,
+            }
+        )
 
-    return documents
+    return docs
 
 
-def hotpotqa_record_to_example(record: Dict[str, Any]) -> Dict[str, Any]:
-    context_documents = hotpotqa_context_to_documents(record.get("context"))
+def supporting_titles(supporting_facts: Any) -> List[str]:
+    """Extract unique supporting titles from Hugging Face HotpotQA records."""
+    titles = supporting_facts.get("title", []) if isinstance(supporting_facts, dict) else []
 
-    supporting_facts = record.get("supporting_facts", [])
-    supporting_titles = []
-    for fact in supporting_facts:
-        if isinstance(fact, (list, tuple)) and len(fact) >= 1:
-            title = fact[0]
-            if isinstance(title, str) and title.strip():
-                supporting_titles.append(title.strip())
+    seen = set()
+    result = []
+    for title in titles:
+        title = str(title).strip()
+        if title and title not in seen:
+            seen.add(title)
+            result.append(title)
+
+    return result
+
+
+def record_to_example(record: Dict[str, Any]) -> Dict[str, Any]:
+    docs = context_to_documents(record.get("context", {}))
+    answer = record.get("answer", "")
 
     return {
-        "id": record.get("id"),
+        "id": record.get("id", record.get("_id")),
         "question": record.get("question", ""),
-        "answer": record.get("answer", ""),
-        "gold": record.get("answer", ""),
-        "context": "\n".join(context_documents),
-        "context_documents": context_documents,
-        "supporting_facts": record.get("supporting_facts", []),
-        "supporting_titles": supporting_titles,
+        "answer": answer,
+        "gold": answer,
+        "context_documents": docs,
+        "supporting_facts": record.get("supporting_facts", {}),
+        "supporting_titles": supporting_titles(record.get("supporting_facts", {})),
         "type": record.get("type"),
         "level": record.get("level"),
     }
 
 
-def hotpotqa_dataset_to_records(dataset: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    return [hotpotqa_record_to_example(record) for record in tqdm(dataset, desc="Converting HotpotQA", unit="example")]
+def dataset_to_records(dataset: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [
+        record_to_example(record)
+        for record in tqdm(dataset, desc="Converting HotpotQA", unit="example")
+    ]
 
 
-def save_jsonl(records: Iterable[Dict[str, Any]], output_path: str | Path) -> None:
-    print(f"[hotpotqa] Saving JSONL to {output_path}", flush=True)
-    output_file = Path(output_path)
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-    with output_file.open("w", encoding="utf-8") as handle:
+def write_jsonl(records: Iterable[Dict[str, Any]], path: str | Path) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    with path.open("w", encoding="utf-8") as f:
         for record in records:
-            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")

@@ -50,12 +50,12 @@ In short, the repository operationalizes the adaptive routing concept end-to-end
 
 ## Layout
 
-- `src/stages/` contains all stage-specific code and shared utilities:
-  - `src/stages/common/` — Shared data and RAG utilities used by multiple stages (schemas, file I/O, HotpotQA loaders, LLM, retriever, pipeline)
-  - `src/stages/<stage>/` — Per-stage entrypoints and workflow helpers (prepare_hotpotqa, build_index, generate_responses, generate_labels, train_router, evaluate)
+- `src/` contains all stage-specific code and shared utilities:
+  - `src/common/` — Shared data and RAG utilities used by multiple (schemas, file I/O, HotpotQA loaders, LLM, retriever, pipeline)
+  - `src/<stage>/` — Per-stage entrypoints and workflow helpers (prepare_hotpotqa, build_index, generate_responses, generate_labels, train_router, evaluate)
 - `data/` is the default location for prepared datasets and generated artifacts
 
-All code is now consolidatedwithin `src/stages/` for easier readability and maintenance. Each stage contains only the files and functions needed for that stage, with cross-stage imports from `src.stages.common.*` when necessary.
+All code is now consolidatedwithin `src/` for easier readability and maintenance. Each stage contains only the files and functions needed for that stage, with cross-stage imports from `src.common.*` when necessary.
 
 ## Setup
 
@@ -109,33 +109,33 @@ Retrieval corpora can use `title`, `text`, `content`, `passage`, `document`, or 
 
 ## Stage Entrypoints
 
-The repository now exposes per-stage entrypoints under `src/stages/`. Each stage has a `main.py` that can be invoked with `python -m`.
+The repository now exposes per-stage entrypoints under `src/`. Each stage has a `main.py` that can be invoked with `python -m`.
 
-Common stages and their purposes:
+Common and their purposes:
 
-1. `src/stages/prepare_hotpotqa/main.py`
+1. `src/prepare_hotpotqa/main.py`
 - Purpose: Downloads and preprocesses HotpotQA into local JSONL files.
 - Main outputs: `data/hotpotqa/train.jsonl`, `data/hotpotqa/validation.jsonl`, and optional `data/hotpotqa/corpus.jsonl`.
 
-2. `src/stages/build_index/main.py`
+2. `src/build_index/main.py`
 - Purpose: Builds the dense FAISS retrieval index and stores structured document metadata.
 - Main outputs: `data/index/index.faiss` and `data/index/documents.json`.
 
-3. `src/stages/evaluate/main.py`
+3. `src/evaluate/main.py`
 - Purpose: Evaluates retrieval quality and other diagnostics (retrieval-only modes available).
 - Main outputs: retrieval metrics JSON plus per-example JSONL diagnostics.
 
-4. `src/stages/generate_responses/main.py`
+4. `src/generate_responses/main.py`
 - Purpose: Runs the QA pipeline with `no-rag`, `single`, or `multi` strategies.
 - Main outputs: streaming prediction JSONL and per-strategy stats files.
 
-5. `src/stages/generate_labels/main.py`
+5. `src/generate_labels/main.py`
 - Purpose: Creates weak supervision labels for router training by scoring the output of each strategy.
 
-6. `src/stages/train_router/main.py`
+6. `src/train_router/main.py`
 - Purpose: Trains the query-complexity router/classifier from config-controlled training settings.
 
-7. `src/stages/evaluate/main.py`
+7. `src/evaluate/main.py`
 - Purpose: Computes answer metrics such as EM/F1 from predictions and reference answers.
 
 ## Ordered Commands
@@ -143,50 +143,50 @@ Common stages and their purposes:
 ### 1) Prepare HotpotQA data
 
 ```bash
-python -m src.stages.prepare_hotpotqa.main
+python -m src.prepare_hotpotqa.main
 ```
 
 ### 2) Build dense retrieval index (one-time, reusable)
 
 ```bash
-python -m src.stages.build_index.main
+python -m src.build_index.main
 ```
 
 ### 3) Evaluate retrieval quality
 
 ```bash
-python -m src.stages.evaluate.main --mode retrieval --retriever dense --output experiments/retrieval_eval/dense_metrics.json
+python -m src.evaluate.main --mode retrieval --retriever dense --output experiments/retrieval_eval/dense_metrics.json
 ```
 
 ### 4) Run RAG pipelines to produce predictions
 
 ```bash
-python -m src.stages.generate_responses.main
+python -m src.generate_responses.main
 ```
 
 Index reuse behavior:
 
 -- `index_dir` in the pipeline config is required and must contain `documents.json`.
 -- If the index is missing, the stage exits with a clear error.
--- Build (or rebuild) the index first with `python -m src.stages.build_index.main`.
+-- Build (or rebuild) the index first with `python -m src.build_index.main`.
 
 ### 6) Generate weak labels (required before classifier training)
 
 Label generation uses all three RAG strategies and scores each result against the ground truth answer.
 
 ```bash
-python -m src.stages.generate_labels.main
+python -m src.generate_labels.main
 ```
 
 ### 7) Train router classifier
 
 
 ```bash
-python -m src.stages.train_router.main
+python -m src.train_router.main
 ```
 
 ### 8) Evaluate predictions
 
 ```bash
-python -m src.stages.evaluate.main
+python -m src.evaluate.main
 ```

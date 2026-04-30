@@ -41,7 +41,7 @@ llm:
   model_name: google/flan-t5-xl
   device: cuda
   dtype: float16
-  batch_size: 8
+  batch_size: 16
   max_input_length: 2048
   max_new_tokens: 32
   cot_max_new_tokens: 128
@@ -58,6 +58,11 @@ retriever:
   top_k_single: 6
   top_k_multi: 6
   final_k_multi: 6
+  # Index building parameters
+  nlist: null  # Number of index clusters (optional, auto if null)
+  nprobe: 8    # Number of clusters to probe during search
+  batch_size: 1024  # Batch size for embedding and indexing
+  smoke_test_k: 3   # Number of results to retrieve in smoke test
 
 # -------------------------
 # Pipeline defaults
@@ -67,6 +72,9 @@ pipeline:
   pipeline_batch_size: 128
   multi:
     steps: 2
+  # Data generation parameters
+  split: train  # Which dataset split to use: train or validation
+  limit: null   # Max records to process (null for all)
 
 # -------------------------
 # Label generation

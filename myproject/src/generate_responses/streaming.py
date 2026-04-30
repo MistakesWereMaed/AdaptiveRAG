@@ -1,73 +1,51 @@
-"""Streaming JSONL writer for per-query result output."""
+from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any, Dict
 
 
 class MetricsAccumulator:
     def __init__(self):
-        self.latencies = []
-        self.retrieval_counts = []
-        self.llm_call_counts = []
         self.count = 0
+        self.total_latency_s = 0.0
+        self.total_retrievals = 0
+        self.total_llm_calls = 0
 
-    def record(self, latency_s: float, retrieval_count: int, llm_call_count: int):
-        self.latencies.append(latency_s)
-        self.retrieval_counts.append(retrieval_count)
-        self.llm_call_counts.append(llm_call_count)
+    def record(self, latency_s: float, retrieval_count: int, llm_calls: int) -> None:
         self.count += 1
+        self.total_latency_s += float(latency_s)
+        self.total_retrievals += int(retrieval_count)
+        self.total_llm_calls += int(llm_calls)
 
     def to_dict(self) -> Dict[str, Any]:
-        if self.count == 0:
-            return {
-                "num_examples": 0,
-                "avg_latency_s": 0.0,
-                "total_latency_s": 0.0,
-                "total_retrievals": 0,
-                "total_llm_calls": 0,
-            }
-
         return {
             "num_examples": self.count,
-            "avg_latency_s": sum(self.latencies) / self.count,
-            "total_latency_s": sum(self.latencies),
-            "total_retrievals": sum(self.retrieval_counts),
-            "total_llm_calls": sum(self.llm_call_counts),
+            "avg_latency_s": self.total_latency_s / self.count if self.count else 0.0,
+            "total_latency_s": self.total_latency_s,
+            "total_retrievals": self.total_retrievals,
+            "total_llm_calls": self.total_llm_calls,
         }
 
 
-class StreamingPrettyWriter:
-    def __init__(self, output_path: Path):
-        self.output_path = Path(output_path)
+class StreamingJSONLWriter:
+    def __init__(self, path: str | Path):
+        self.path = Path(path)
         self.file = None
-        self.first = True
+        self.count = 0
 
     def __enter__(self):
-        pretty_path = self.output_path.with_suffix(".json")
-        pretty_path.parent.mkdir(parents=True, exist_ok=True)
-        self.file = pretty_path.open("w", encoding="utf-8")
-        self.file.write("[\n")
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.file = self.path.open("w", encoding="utf-8")
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.file:
-            self.file.write("\n]\n")
             self.file.close()
 
-    def write(self, record: Dict[str, Any]):
+    def write(self, record: Dict[str, Any]) -> None:
         if self.file is None:
-            raise RuntimeError("Must use context manager: with StreamingPrettyWriter(...) as w:")
+            raise RuntimeError("Writer must be used as a context manager")
 
-        if not self.first:
-            self.file.write(",\n")
-        self.first = False
-
-        pretty = json.dumps(record, ensure_ascii=False, indent=2)
-        indented = "\n".join("  " + line for line in pretty.splitlines())
-        self.file.write(indented)
-        self.file.flush()
-
-    def get_count(self) -> int:
-        # best-effort: count lines in pretty file (not strictly necessary)
-        return self.first == False and 0 or 0
+        self.file.write(json.dumps(record, ensure_ascii=False) + "\n")
+        self.count += 1

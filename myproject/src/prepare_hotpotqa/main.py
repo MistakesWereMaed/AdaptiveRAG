@@ -1,93 +1,76 @@
-import argparse
+from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
 
 from tqdm.auto import tqdm
 
-from myproject.src.file_loader import load_yaml_config
-from myproject.src.prepare_hotpotqa.hotpotqa import (
-    hotpotqa_context_to_structured_documents,
-    hotpotqa_dataset_to_records,
+from src.file_loader import load_yaml_config
+from src.prepare_hotpotqa.hotpotqa import (
+    dataset_to_records,
     load_hotpotqa_split,
+    write_jsonl,
 )
 
 
-def _normalize_id(record: Dict[str, Any], index: int) -> Dict[str, Any]:
-    current = dict(record)
-    raw_id = current.get("id")
-
-    if raw_id is None:
-        current["id"] = index
-        return current
-
-    try:
-        current["id"] = int(raw_id)
-    except (TypeError, ValueError):
-        current["source_id"] = str(raw_id)
-        current["id"] = index
-
-    return current
+def _stable_id(record: Dict[str, Any], fallback: int) -> str | int:
+    return record.get("id") or record.get("source_id") or fallback
 
 
-def _write_jsonl(records: Iterable[Dict[str, Any]], output_path: Path) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+def _normalize_ids(records: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    output = []
 
-    with output_path.open("w", encoding="utf-8") as handle:
-        for index, record in enumerate(
-            tqdm(records, desc=f"Writing {output_path.name}", unit="record")
-        ):
-            normalized = _normalize_id(record, index)
-            handle.write(json.dumps(normalized, ensure_ascii=False) + "\n")
+    for idx, record in enumerate(records):
+        item = dict(record)
+        raw_id = _stable_id(item, idx)
+
+        try:
+            item["id"] = int(raw_id)
+        except (TypeError, ValueError):
+            item["source_id"] = str(raw_id)
+            item["id"] = idx
+
+        output.append(item)
+
+    return output
 
 
-def _dedupe_key(doc: Dict[str, Any]) -> Tuple[str, str]:
-    title = str(doc.get("title", "")).strip()
-    text = str(doc.get("text", "")).strip()
-    return title, text
+def _doc_key(title: str, text: str) -> Tuple[str, str]:
+    return title.strip(), text.strip()
 
 
-def _build_corpus(records: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def build_corpus(records: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Build a deduplicated title-aware paragraph corpus from parsed records."""
     corpus: List[Dict[str, Any]] = []
-    seen_keys = set()
+    seen = set()
 
-    for record in tqdm(records, desc="Building HotpotQA corpus", unit="example"):
-        context_documents = record.get("context_documents")
+    for record in tqdm(records, desc="Building corpus", unit="example"):
+        source_id = record.get("source_id", record.get("id"))
 
-        if not isinstance(context_documents, list):
-            context_documents = hotpotqa_context_to_structured_documents(
-                record.get("raw_context") or record.get("context")
-            )
-
-        for paragraph_index, doc in enumerate(context_documents):
-            if not isinstance(doc, dict):
-                continue
-
+        for local_idx, doc in enumerate(record.get("context_documents", [])):
             title = str(doc.get("title", "")).strip()
             text = str(doc.get("text", "")).strip()
 
             if not text:
                 continue
 
-            key = _dedupe_key({"title": title, "text": text})
-            if key in seen_keys:
+            key = _doc_key(title, text)
+            if key in seen:
                 continue
 
-            seen_keys.add(key)
-
-            doc_id = f"hotpotqa_{len(corpus)}"
+            seen.add(key)
+            corpus_id = len(corpus)
 
             corpus.append(
                 {
-                    "id": len(corpus),
-                    "doc_id": doc_id,
+                    "id": corpus_id,
+                    "doc_id": f"hotpotqa_{corpus_id}",
                     "title": title,
                     "text": text,
                     "source": "hotpotqa",
                     "metadata": {
-                        "original_example_id": record.get("source_id", record.get("id")),
-                        "paragraph_index": paragraph_index,
+                        "original_example_id": source_id,
+                        "paragraph_index": doc.get("paragraph_index", local_idx),
                     },
                 }
             )
@@ -95,58 +78,40 @@ def _build_corpus(records: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return corpus
 
 
-def run_prepare_hotpotqa(config_path: str = "config.yaml") -> None:
-    print("[prepare_hotpotqa] Starting HotpotQA preprocessing", flush=True)
-
+def main() -> None:
+    config_path = "config.yaml"
     paths = load_yaml_config(config_path, section="paths")
-    config = load_yaml_config(config_path, section="hotpotqa")
+    cfg = load_yaml_config(config_path, section="hotpotqa")
 
-    output_dir = Path(paths["hotpotqa_dir"])
-    output_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = Path(paths["hotpotqa_dir"])
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    config_name = str(config.get("config_name", "distractor"))
-    build_corpus = bool(config.get("build_corpus", True))
+    config_name = str(cfg.get("config_name", "distractor"))
+    build_corpus_flag = bool(cfg.get("build_corpus", True))
 
     train_records: List[Dict[str, Any]] = []
 
-    for split in tqdm(("train", "validation"), desc="HotpotQA splits", unit="split"):
+    for split in ("train", "validation"):
         dataset = load_hotpotqa_split(split=split, config_name=config_name)
-        records = hotpotqa_dataset_to_records(dataset)
+        records = _normalize_ids(dataset_to_records(dataset))
+
+        write_jsonl(records, out_dir / f"{split}.jsonl")
 
         if split == "train":
             train_records = records
 
-        _write_jsonl(records, output_dir / f"{split}.jsonl")
+    if not build_corpus_flag:
+        return
 
-    if build_corpus:
-        corpus = _build_corpus(train_records)
+    corpus = build_corpus(train_records)
+    if not corpus:
+        raise RuntimeError("No corpus passages were extracted from HotpotQA.")
 
-        if not corpus:
-            raise ValueError(
-                "HotpotQA corpus extraction produced no passages. "
-                "Check dataset schema, config name, or context parser."
-            )
+    non_empty_titles = sum(bool(doc["title"]) for doc in corpus)
+    if non_empty_titles == 0:
+        raise RuntimeError("Corpus was built, but every title is empty.")
 
-        _write_jsonl(corpus, Path(paths["corpus"]))
-
-        non_empty_titles = sum(1 for doc in corpus if doc.get("title"))
-        print(
-            f"[prepare_hotpotqa] Corpus size: {len(corpus)} passages; "
-            f"non-empty titles: {non_empty_titles}",
-            flush=True,
-        )
-
-        if non_empty_titles == 0:
-            raise ValueError(
-                "Corpus was built, but all titles are empty. "
-                "This indicates title extraction is still broken."
-            )
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Download and preprocess HotpotQA")
-    parser.add_argument("--config", default="config.yaml", help="Path to config")
-    args = parser.parse_args()
-    run_prepare_hotpotqa(args.config)
+    write_jsonl(corpus, Path(paths["corpus"]))
 
 
 if __name__ == "__main__":
