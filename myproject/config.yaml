@@ -41,7 +41,7 @@ llm:
   model_name: google/flan-t5-xl
   device: cuda
   dtype: float16
-  batch_size: 16
+  batch_size: 8
   max_input_length: 2048
   max_new_tokens: 32
   cot_max_new_tokens: 128
@@ -55,34 +55,18 @@ llm:
 # -------------------------
 retriever:
   encoder_name: BAAI/bge-base-en-v1.5
-  top_k_single: 2
-  top_k_multi: 4
-  index_type: flat_l2
-  dense:
-    encoder_name: BAAI/bge-base-en-v1.5
-    index_path: data/index
+  top_k_single: 6
+  top_k_multi: 6
+  final_k_multi: 6
 
 # -------------------------
 # Pipeline defaults
 # -------------------------
 pipeline:
   strategy: single
-  pipeline_batch_size: 64
+  pipeline_batch_size: 128
   multi:
     steps: 2
-    raw_k_per_query: 4
-
-    mode: ircot
-    initial_k: 4
-    final_k: 8
-    cot_max_new_tokens: 64
-
-# -------------------------
-# Debug logging
-# -------------------------
-debug:
-  log_prompts: false
-  max_logged_prompts: 100
 
 # -------------------------
 # Label generation

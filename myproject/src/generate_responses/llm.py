@@ -1,27 +1,25 @@
 from __future__ import annotations
 
 import re
-from typing import List, Optional, Tuple, Union
-
 import torch
+
+from typing import List, Optional, Union
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
-
-from src.rag.postprocess import clean_answer
-from src.rag.trace import ExecutionTrace
+from myproject.src.generate_labels.squad import normalize_text
 
 
-ANSWER_IS_RE = re.compile(r".*answer is:?\s*(.*)", re.IGNORECASE | re.DOTALL)
+ANSWER_IS_RE = re.compile(r".*answer is:?")
 
 
 def extract_cot_answer(text: str) -> str:
     if not text:
         return ""
 
-    match = ANSWER_IS_RE.match(text.strip())
+    match = re.match(r".*answer is:?\s*(.*)", text.strip(), re.IGNORECASE | re.DOTALL)
     if match:
-        return clean_answer(match.group(1))
+        return normalize_text(match.group(1))
 
-    return clean_answer(text)
+    return normalize_text(text)
 
 
 def parse_generated_queries(
@@ -52,16 +50,6 @@ def parse_generated_queries(
 
 
 class LocalLLM:
-    """
-    FLAN-T5 / T5 seq2seq wrapper using the paper-style prompt formats.
-
-    Supported strategies:
-      - no_context_direct
-      - gold_context_direct
-      - cot
-      - query_generation
-    """
-
     def __init__(self, config: dict):
         self.model_name = config.get("model_name", "google/flan-t5-xl")
         self.device = torch.device(config.get("device", "cuda" if torch.cuda.is_available() else "cpu"))
@@ -92,9 +80,6 @@ class LocalLLM:
         self.model.to(self.device)
         self.model.eval()
 
-    # --------------------------------------------------
-    # Trace helpers
-    # --------------------------------------------------
     def _record_llm_call(
         self,
         trace: Optional[Union[ExecutionTrace, List[ExecutionTrace]]],
@@ -110,9 +95,6 @@ class LocalLLM:
         else:
             trace.record_llm_call(num_calls)
 
-    # --------------------------------------------------
-    # Prompt formatting
-    # --------------------------------------------------
     @staticmethod
     def format_passages(docs) -> str:
         blocks = []
@@ -153,9 +135,6 @@ class LocalLLM:
             f"A:"
         )
 
-    # --------------------------------------------------
-    # Generation
-    # --------------------------------------------------
     @torch.inference_mode()
     def generate(
         self,
@@ -213,17 +192,13 @@ class LocalLLM:
 
         return all_outputs
 
-    # --------------------------------------------------
-    # QA wrappers
-    # --------------------------------------------------
     def answer(
         self,
         questions: List[str],
         contexts: Optional[List[Optional[str]]] = None,
         strategy: str = "direct",
         trace: Optional[Union[ExecutionTrace, List[ExecutionTrace]]] = None,
-        return_debug: bool = False,
-    ) -> Union[List[str], Tuple[List[str], List[dict]]]:
+    ) -> List[str]:
         if contexts is None:
             contexts = [None] * len(questions)
 
@@ -254,38 +229,14 @@ class LocalLLM:
         else:
             cleaned_outputs = [clean_answer(text) for text in raw_outputs]
 
-        final_outputs = [text if text else "unknown" for text in cleaned_outputs]
-
-        if return_debug:
-            debug_rows = []
-
-            for prompt, raw, cleaned, final in zip(
-                prompts,
-                raw_outputs,
-                cleaned_outputs,
-                final_outputs,
-            ):
-                debug_rows.append(
-                    {
-                        "prompt": prompt,
-                        "raw_generation": raw,
-                        "cleaned_generation": cleaned,
-                        "final_generation": final,
-                        "strategy_prompt_type": strategy,
-                    }
-                )
-
-            return final_outputs, debug_rows
-
-        return final_outputs
+        return [text if text else "unknown" for text in cleaned_outputs]
 
     def generate_search_queries(
         self,
         questions: List[str],
         trace: Optional[Union[ExecutionTrace, List[ExecutionTrace]]] = None,
         max_queries: int = 2,
-        return_debug: bool = False,
-    ) -> Union[List[List[str]], Tuple[List[List[str]], List[dict]]]:
+    ) -> List[List[str]]:
         prompts = [
             self.format_query_generation_prompt(question, max_queries=max_queries)
             for question in questions
@@ -299,23 +250,7 @@ class LocalLLM:
             do_sample=False,
         )
 
-        parsed = [
+        return [
             parse_generated_queries(output, question, max_queries=max_queries)
             for output, question in zip(raw_outputs, questions)
         ]
-
-        if return_debug:
-            debug_rows = []
-
-            for prompt, raw, queries in zip(prompts, raw_outputs, parsed):
-                debug_rows.append(
-                    {
-                        "search_query_prompt": prompt,
-                        "search_query_raw_generation": raw,
-                        "search_queries": queries,
-                    }
-                )
-
-            return parsed, debug_rows
-
-        return parsed
