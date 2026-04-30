@@ -152,25 +152,13 @@ python -m src.prepare_hotpotqa.main
 python -m src.build_index.main
 ```
 
-### 3) Evaluate retrieval quality
-
-```bash
-python -m src.evaluate.main --mode retrieval --retriever dense --output experiments/retrieval_eval/dense_metrics.json
-```
-
-### 4) Run RAG pipelines to produce predictions
+### 3) Run RAG pipelines to produce predictions
 
 ```bash
 python -m src.generate_responses.main
 ```
 
-Index reuse behavior:
-
--- `index_dir` in the pipeline config is required and must contain `documents.json`.
--- If the index is missing, the stage exits with a clear error.
--- Build (or rebuild) the index first with `python -m src.build_index.main`.
-
-### 6) Generate weak labels (required before classifier training)
+### 4) Generate weak labels
 
 Label generation uses all three RAG strategies and scores each result against the ground truth answer.
 
@@ -178,16 +166,15 @@ Label generation uses all three RAG strategies and scores each result against th
 python -m src.generate_labels.main
 ```
 
-### 7) Train router classifier
+### 5) Train router classifier
 
 
 ```bash
 python -m src.train_router.main
-torchrun -m src.train_router.main
 ```
 
-### 8) Evaluate predictions
+### 6) Evaluate Trained Router
 
 ```bash
-python -m src.evaluate.main
+python -m src.evaluate_router.main
 ```

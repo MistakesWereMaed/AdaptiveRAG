@@ -53,6 +53,11 @@ paths:
   labeled_train_stats: &labeled_train_stats data/labeled/labeled_train.stats.json
   labeled_validation_stats: &labeled_validation_stats data/labeled/labeled_validation.stats.json
 
+  # -------------------------
+  # Classifier
+  # -------------------------
+  router_checkpoint: checkpoints/best.ckpt
+
 # -------------------------
 # HotpotQA preprocessing
 # -------------------------
@@ -100,7 +105,7 @@ pipeline:
     steps: 2
   # Data generation parameters
   split: train  # Which dataset split to use: train or validation
-  limit: 1000   # Max records to process (null for all)
+  limit: 10000   # Max records to process (null for all)
 
 # -------------------------
 # Label generation
@@ -117,17 +122,17 @@ labels:
 model:
   model_name: distilbert-base-uncased
   num_classes: 3
-  dropout: 0.1
-  learning_rate: 1e-5
-  weight_decay: 0.01
+  dropout: 0.2
+  learning_rate: 2e-5
+  weight_decay: 0.05
   max_length: 256
 
 # -------------------------
 # Training / experiment
 # -------------------------
 train:
-  batch_size: 16
-  max_epochs: 5
+  batch_size: 32
+  max_epochs: 10
   num_workers: 2
   val_split: 0.1
   seed: 42
