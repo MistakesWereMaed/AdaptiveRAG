@@ -16,17 +16,42 @@
 # -------------------------
 paths:
   hotpotqa_dir: &hotpotqa_dir data/hotpotqa
+
+  # -------------------------
+  # Dataset
+  # -------------------------
   train_data: &train_data data/hotpotqa/train.jsonl
   validation_data: &validation_data data/hotpotqa/validation.jsonl
   corpus: &corpus data/hotpotqa/corpus.jsonl
+
+  # -------------------------
+  # Index
+  # -------------------------
   index_dir: &index_dir data/index
-  predictions_base: &predictions_base data/predictions/predictions.jsonl
-  predictions_no_rag: &predictions_no_rag data/predictions/predictions-no-rag.jsonl
-  predictions_single: &predictions_single data/predictions/predictions-single.jsonl
-  predictions_multi: &predictions_multi data/predictions/predictions-multi.jsonl
+
+  # -------------------------
+  # Predictions
+  # -------------------------
+  predictions_train_base: &predictions_train_base data/predictions/train.jsonl
+  predictions_validation_base: &predictions_validation_base data/predictions/validation.jsonl
+
+  # Optional explicit paths (not required but useful for debugging)
+  predictions_train_no_rag: data/predictions/train-no-rag.jsonl
+  predictions_train_single: data/predictions/train-single.jsonl
+  predictions_train_multi: data/predictions/train-multi.jsonl
+
+  predictions_validation_no_rag: data/predictions/validation-no-rag.jsonl
+  predictions_validation_single: data/predictions/validation-single.jsonl
+  predictions_validation_multi: data/predictions/validation-multi.jsonl
+
+  # -------------------------
+  # Labels
+  # -------------------------
   labeled_train: &labeled_train data/labeled/labeled_train.json
   labeled_validation: &labeled_validation data/labeled/labeled_validation.json
-  labeled_stats: &labeled_stats data/labeled/labeled_train.stats.json
+
+  labeled_train_stats: &labeled_train_stats data/labeled/labeled_train.stats.json
+  labeled_validation_stats: &labeled_validation_stats data/labeled/labeled_validation.stats.json
 
 # -------------------------
 # HotpotQA preprocessing
@@ -69,7 +94,7 @@ retriever:
 # Pipeline defaults
 # -------------------------
 pipeline:
-  strategy: multi
+  strategy: all
   pipeline_batch_size: 128
   multi:
     steps: 2

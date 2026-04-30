@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -10,6 +11,8 @@ from src.file_loader import load_predictions, load_records, load_yaml_config
 from src.generate_labels.squad import evaluate_batch, is_correct, mean
 
 
+VALID_SPLITS = {"train", "validation"}
+
 STRATEGY_TO_LABEL = {"no-rag": 0, "single": 1, "multi": 2}
 STRATEGY_ORDER = list(STRATEGY_TO_LABEL)
 COST_PRIORITY = ["no-rag", "single", "multi"]
@@ -19,13 +22,69 @@ def _strategy_attr(strategy: str) -> str:
     return strategy.replace("-", "_")
 
 
+def _data_path(paths: dict, split: str) -> str:
+    key = f"{split}_data"
+    if key not in paths:
+        raise KeyError(f"Missing paths.{key} in config")
+    return paths[key]
+
+
+def _prediction_base(paths: dict, split: str) -> Path:
+    split_key = f"predictions_{split}_base"
+    if split_key in paths:
+        return Path(paths[split_key])
+
+    base = Path(paths["predictions_base"])
+    return base.with_name(f"{base.stem}-{split}{base.suffix}")
+
+
+def _label_output_path(paths: dict, split: str) -> Path:
+    """Return split-specific labeled output path.
+
+    Preferred config keys:
+      - labeled_train
+      - labeled_validation
+
+    Fallback:
+      - labeled_train with split appended/replaced
+    """
+    key = f"labeled_{split}"
+    if key in paths:
+        return Path(paths[key])
+
+    base = Path(paths["labeled_train"])
+    return base.with_name(f"{base.stem}-{split}{base.suffix}")
+
+
+def _label_stats_path(paths: dict, split: str) -> Path:
+    """Return split-specific label stats path.
+
+    Preferred config keys:
+      - labeled_train_stats / labeled_stats_train
+      - labeled_validation_stats / labeled_stats_validation
+
+    Fallback:
+      - labeled_stats with split appended
+    """
+    candidates = [
+        f"labeled_{split}_stats",
+        f"labeled_stats_{split}",
+    ]
+    for key in candidates:
+        if key in paths:
+            return Path(paths[key])
+
+    base = Path(paths["labeled_stats"])
+    return base.with_name(f"{base.stem}-{split}{base.suffix}")
+
+
 def _prediction_texts(predictions, strategy: str, start: int, end: int) -> List[str]:
     strategy_predictions = getattr(predictions, _strategy_attr(strategy))
     return [item.prediction for item in strategy_predictions[start:end]]
 
 
 def _rank(scores: Dict[str, float], ems: Dict[str, float]) -> List[str]:
-    return sorted(STRATEGY_ORDER, key=lambda s: (ems[s], scores[s]), reverse=True)
+    return sorted(STRATEGY_ORDER, key=lambda s: (scores[s], ems[s]), reverse=True)
 
 
 def choose_label(
@@ -58,7 +117,10 @@ def _available_examples(dataset_size: int, predictions) -> int:
     return min(available)
 
 
-def run_generate_labels(config_path: str = "config.yaml") -> None:
+def run_generate_labels(config_path: str = "config.yaml", split: str = "train") -> None:
+    if split not in VALID_SPLITS:
+        raise ValueError(f"split must be one of {sorted(VALID_SPLITS)}")
+
     cfg = load_yaml_config(config_path)
     paths = cfg["paths"]
     label_cfg = cfg["labels"]
@@ -67,14 +129,14 @@ def run_generate_labels(config_path: str = "config.yaml") -> None:
     margin = float(label_cfg.get("margin", 0.05))
     batch_size = int(label_cfg.get("batch_size", 64))
 
-    dataset = load_records(paths["train_data"])
-    predictions = load_predictions(paths["predictions_base"])
+    dataset = load_records(_data_path(paths, split))
+    predictions = load_predictions(_prediction_base(paths, split))
 
     evaluated_total = _available_examples(len(dataset), predictions)
     dataset = dataset[:evaluated_total]
 
-    output_path = Path(paths["labeled_train"])
-    stats_path = Path(paths["labeled_stats"])
+    output_path = _label_output_path(paths, split)
+    stats_path = _label_stats_path(paths, split)
 
     strategy_metrics = {s: {"f1": [], "em": [], "acc": []} for s in STRATEGY_ORDER}
     label_counts = {s: 0 for s in STRATEGY_ORDER}
@@ -84,7 +146,7 @@ def run_generate_labels(config_path: str = "config.yaml") -> None:
     weak_labels = 0
     oracle_f1s = []
 
-    for start in tqdm(range(0, evaluated_total, batch_size), desc="Labeling"):
+    for start in tqdm(range(0, evaluated_total, batch_size), desc=f"Labeling {split}"):
         end = min(start + batch_size, evaluated_total)
         batch = dataset[start:end]
 
@@ -138,7 +200,8 @@ def run_generate_labels(config_path: str = "config.yaml") -> None:
     labeled_total = len(labeled_records)
 
     stats = {
-        "total_examples": len(load_records(paths["train_data"])),
+        "split": split,
+        "total_examples": len(load_records(_data_path(paths, split))),
         "evaluated_examples": evaluated_total,
         "labeled_examples": labeled_total,
         "unlabeled": unlabeled,
@@ -195,15 +258,23 @@ def run_generate_labels(config_path: str = "config.yaml") -> None:
     print(f"{stats['oracle_f1']:.4f}")
 
     print("\n=== Labeling Summary ===")
-    print(f"Total examples:   {stats['total_examples']}")
-    print(f"Evaluated:        {evaluated_total}")
-    print(f"Labeled examples: {labeled_total}")
-    print(f"Unlabeled:        {unlabeled} ({stats['unlabeled_pct_of_evaluated']:.2%} of evaluated)")
-    print(f"Weak labels:      {weak_labels} ({stats['weak_label_pct']:.2%} of labeled)")
+    print(f"Split:           {split}")
+    print(f"Total examples:  {stats['total_examples']}")
+    print(f"Evaluated:       {evaluated_total}")
+    print(f"Labeled:         {labeled_total}")
+    print(f"Unlabeled:       {unlabeled} ({stats['unlabeled_pct_of_evaluated']:.2%} of evaluated)")
+    print(f"Weak labels:     {weak_labels} ({stats['weak_label_pct']:.2%} of labeled)")
+    print(f"Output:          {output_path}")
+    print(f"Stats:           {stats_path}")
 
 
 def main() -> None:
-    run_generate_labels("config.yaml")
+    parser = argparse.ArgumentParser(description="Generate router labels from strategy predictions")
+    parser.add_argument("--config", default="config.yaml")
+    parser.add_argument("--split", default="train", choices=sorted(VALID_SPLITS))
+    args = parser.parse_args()
+
+    run_generate_labels(args.config, split=args.split)
 
 
 if __name__ == "__main__":

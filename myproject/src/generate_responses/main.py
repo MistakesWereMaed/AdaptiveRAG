@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 from typing import Any, List
@@ -11,6 +12,34 @@ from src.file_loader import load_records, load_yaml_config
 from src.generate_responses.llm import LocalLLM
 from src.generate_responses.pipeline import AdaptiveRAGPipeline
 from src.generate_responses.streaming import MetricsAccumulator, StreamingJSONLWriter
+
+
+VALID_SPLITS = {"train", "validation"}
+
+
+def _data_path(paths: dict, split: str) -> str:
+    key = f"{split}_data"
+    if key not in paths:
+        raise KeyError(f"Missing paths.{key} in config")
+    return paths[key]
+
+
+def _prediction_base(paths: dict, split: str) -> Path:
+    """Return split-specific prediction base path.
+
+    Preferred config keys:
+      - predictions_train_base
+      - predictions_validation_base
+
+    Fallback:
+      - predictions_base, with split appended to filename stem
+    """
+    split_key = f"predictions_{split}_base"
+    if split_key in paths:
+        return Path(paths[split_key])
+
+    base = Path(paths["predictions_base"])
+    return base.with_name(f"{base.stem}-{split}{base.suffix}")
 
 
 def _output_path(base: Path, strategy: str) -> Path:
@@ -129,19 +158,24 @@ def run_strategy(
     print(f"[generate_responses] {strategy}: wrote {writer.count} records to {output_path}", flush=True)
 
 
-def run_generate_responses(config_path: str = "config.yaml") -> None:
+def run_generate_responses(
+    config_path: str = "config.yaml",
+    split: str = "train",
+    strategy_override: str | None = None,
+    limit: int | None = None,
+) -> None:
+    if split not in VALID_SPLITS:
+        raise ValueError(f"split must be one of {sorted(VALID_SPLITS)}")
+
     paths, pipeline_cfg, llm_cfg, retriever_cfg = _load_configs(config_path)
 
-    split = str(pipeline_cfg.get("split", "train"))
-    limit = pipeline_cfg.get("limit")
-    data_path = paths["train_data"] if split == "train" else paths["validation_data"]
-    records = load_records(data_path)
-
+    records = load_records(_data_path(paths, split))
     if limit is not None:
         records = records[: max(0, int(limit))]
 
-    output_base = Path(paths["predictions_base"])
+    output_base = _prediction_base(paths, split)
     index_dir = Path(paths["index_dir"])
+
     if not (index_dir / "index.faiss").exists() or not (index_dir / "documents.json").exists():
         raise FileNotFoundError(f"Missing FAISS index files in {index_dir}")
 
@@ -151,10 +185,14 @@ def run_generate_responses(config_path: str = "config.yaml") -> None:
     multi_steps = int((pipeline_cfg.get("multi", {}) or {}).get("steps", 2))
     batch_size = int(pipeline_cfg.get("pipeline_batch_size", 8))
 
-    strategy_cfg = pipeline_cfg.get("strategy", "all")
+    strategy_cfg = strategy_override or pipeline_cfg.get("strategy", "all")
     strategies = _selected_strategies(strategy_cfg)
 
-    print(f"[generate_responses] records={len(records)} strategies={strategies}", flush=True)
+    print(
+        f"[generate_responses] split={split} records={len(records)} "
+        f"strategies={strategies} output_base={output_base}",
+        flush=True,
+    )
 
     llm = LocalLLM(llm_cfg)
     retriever = FaissIVFRetriever(
@@ -180,7 +218,19 @@ def run_generate_responses(config_path: str = "config.yaml") -> None:
 
 
 def main() -> None:
-    run_generate_responses("config.yaml")
+    parser = argparse.ArgumentParser(description="Generate no-rag, single, and multi RAG responses")
+    parser.add_argument("--config", default="config.yaml")
+    parser.add_argument("--split", default="train", choices=sorted(VALID_SPLITS))
+    parser.add_argument("--strategy", default=None, choices=["no-rag", "single", "multi", "all"])
+    parser.add_argument("--limit", type=int, default=None)
+    args = parser.parse_args()
+
+    run_generate_responses(
+        config_path=args.config,
+        split=args.split,
+        strategy_override=args.strategy,
+        limit=args.limit,
+    )
 
 
 if __name__ == "__main__":
