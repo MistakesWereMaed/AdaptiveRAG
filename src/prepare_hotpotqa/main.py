@@ -6,7 +6,7 @@ from typing import Any, Dict, Iterable, List, Tuple
 from tqdm.auto import tqdm
 
 from src.file_loader import load_yaml_config
-from src.prepare_hotpotqa.hotpotqa import (
+from src.prepare_datasets.hotpotqa.hotpotqa import (
     dataset_to_records,
     load_hotpotqa_split,
     write_jsonl,
