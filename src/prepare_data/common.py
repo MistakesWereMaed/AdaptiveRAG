@@ -3,10 +3,7 @@ from __future__ import annotations
 import json
 import random
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence
-
-from datasets import Dataset, load_dataset
-from tqdm.auto import tqdm
+from typing import Any, Dict, Iterable, List, Sequence
 
 
 def first_answer(value: Any) -> str:

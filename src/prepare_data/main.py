@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Tuple
-from tqdm.auto import tqdm
+from typing import Any, Callable, Dict, Iterable, List
 
 from src.prepare_data.common import (
     normalize_numeric_ids,
@@ -124,49 +124,11 @@ def _write_split(
     return output_path
 
 
-def build_deduped_corpus(records: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    corpus: List[Dict[str, Any]] = []
-    seen = set()
-
-    for record in tqdm(records, desc="Building full corpus", unit="example"):
-        dataset = str(record.get("dataset", "unknown"))
-        source_id = record.get("source_id", record.get("id"))
-
-        for local_idx, doc in enumerate(record.get("context_documents", [])):
-            title = str(doc.get("title", "")).strip()
-            text = str(doc.get("text", "")).strip()
-            if not text:
-                continue
-
-            key = (title, text)
-            if key in seen:
-                continue
-            seen.add(key)
-
-            corpus_id = len(corpus)
-            corpus.append(
-                {
-                    "id": corpus_id,
-                    "doc_id": f"{dataset}_{corpus_id}",
-                    "title": title,
-                    "text": text,
-                    "source": dataset,
-                    "metadata": {
-                        "original_example_id": source_id,
-                        "paragraph_index": doc.get("paragraph_index", local_idx),
-                    },
-                }
-            )
-
-    return corpus
-
-
 def prepare_all(
     out_dir: Path,
     sample_size: int,
     seed: int,
     force: bool = False,
-    build_corpus: bool = True,
 ) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -200,22 +162,13 @@ def prepare_all(
 
     full_eval_path = out_dir / f"full_eval_{sample_size}_each.jsonl"
     write_jsonl(full_eval, full_eval_path)
+
     manifest["full_eval_path"] = str(full_eval_path)
     manifest["full_eval_records"] = len(full_eval)
 
-    if build_corpus:
-        # Build a compact corpus from the sampled evaluation contexts.
-        # This is useful for debugging but is not a substitute for the paper's
-        # official BM25 Wikipedia/IRCoT corpora.
-        corpus = build_deduped_corpus(full_eval)
-        corpus_path = out_dir / f"full_eval_{sample_size}_each_context_corpus.jsonl"
-        write_jsonl(corpus, corpus_path)
-        manifest["sample_context_corpus_path"] = str(corpus_path)
-        manifest["sample_context_corpus_records"] = len(corpus)
-
-    import json
     manifest_path = out_dir / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
     print(f"[done] wrote manifest -> {manifest_path}")
     print(f"[done] full eval -> {full_eval_path}")
 
@@ -228,7 +181,6 @@ def main() -> None:
     parser.add_argument("--sample-size", type=int, default=500)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--force", action="store_true")
-    parser.add_argument("--no-corpus", action="store_true")
     args = parser.parse_args()
 
     prepare_all(
@@ -236,7 +188,6 @@ def main() -> None:
         sample_size=args.sample_size,
         seed=args.seed,
         force=args.force,
-        build_corpus=not args.no_corpus,
     )
 
 

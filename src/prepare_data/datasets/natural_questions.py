@@ -5,7 +5,7 @@ from typing import Any, Dict, Iterable, List
 from datasets import load_dataset
 from tqdm.auto import tqdm
 
-from src.prepare_datasets.common import answer_list, document, first_answer
+from src.prepare_data.common import answer_list, document
 
 
 def load_natural_questions_split(
