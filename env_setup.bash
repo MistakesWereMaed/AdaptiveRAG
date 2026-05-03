@@ -22,18 +22,12 @@ echo "======================================"
 
 # Install uv (inside env)
 pip install uv
-uv pip install cmake
-
-echo "======================================"
-echo "Installing vLLM via uv"
-echo "======================================"
-
-# Install vLLM FIRST (important for dependency resolution)
-uv pip install vllm --torch-backend=cu121 --no-build-isolation
 
 echo "======================================"
 echo "Installing project requirements"
 echo "======================================"
+
+uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
 
 # Install your requirements
 if [ -f requirements.txt ]; then
@@ -41,8 +35,6 @@ if [ -f requirements.txt ]; then
 else
     echo "WARNING: requirements.txt not found, skipping."
 fi
-
-uv pip install vllm --torch-backend=cu121 --no-build-isolation --no-deps
 
 echo "======================================"
 echo "Environment setup complete"

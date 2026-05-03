@@ -7,7 +7,7 @@ from typing import Any, List
 
 from tqdm.auto import tqdm
 
-from src.build_index.retriever import FaissIVFRetriever
+from src.build_index.utils import FaissIVFRetriever
 from src.file_loader import load_records, load_yaml_config
 from src.generate_responses.llm import LocalLLM
 from src.generate_responses.pipeline import AdaptiveRAGPipeline

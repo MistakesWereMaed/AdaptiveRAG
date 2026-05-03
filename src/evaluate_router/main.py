@@ -7,7 +7,7 @@ from collections import Counter, defaultdict
 from typing import Any, List
 from tqdm.auto import tqdm
 
-from src.build_index.retriever import FaissIVFRetriever
+from src.build_index.utils import FaissIVFRetriever
 from src.evaluate_router.router import RouterPredictor
 from src.file_loader import load_records
 from src.generate_responses.llm import LocalLLM

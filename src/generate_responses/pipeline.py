@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import List, Sequence
 
 from src.schemas import RetrievedDocument
-from src.build_index.retriever import FaissIVFRetriever
+from src.build_index.utils import FaissIVFRetriever
 
 import re
 

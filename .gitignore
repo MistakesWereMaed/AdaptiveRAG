@@ -23,6 +23,7 @@ dist/
 .env.*
 
 # Model and experiment artifacts
+data/
 wandb/
 *.pt
 *.pth
@@ -32,6 +33,8 @@ wandb/
 *.json
 *.jsonl
 *.pkl
+elasticsearch*
+ircot
 
 # Retrieval and cache files
 cache.json
