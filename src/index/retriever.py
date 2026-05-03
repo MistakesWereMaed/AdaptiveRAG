@@ -1,3 +1,5 @@
+# Adapted from "retriever_server.py" from the IRCoT codebase https://github.com/StonyBrookNLP/ircot
+
 from typing import List, Dict
 import argparse
 
@@ -164,17 +166,16 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     retriever = ElasticsearchRetriever(
-        corpus_name=args.dataset_name,
         host=args.host,
         port=args.port,
     )
 
     print("\n\nRetrieving Titles ...")
-    results = retriever.retrieve_titles("injuries")
+    results = retriever.retrieve_titles(query_text="injuries", corpus_name=args.dataset_name)
     for result in results:
         print(result)
 
     print("\n\nRetrieving Paragraphs ...")
-    results = retriever.retrieve_paragraphs("injuries")
+    results = retriever.retrieve_paragraphs(query_text="injuries", corpus_name=args.dataset_name)
     for result in results:
         print(result)
