@@ -19,7 +19,7 @@ class ElasticsearchRetriever:
     """
 
     def __init__(self, host: str = "localhost", port: int = 9200):
-        self._es = Elasticsearch([host], scheme="http", port=port, timeout=30)
+        self._es = Elasticsearch([host], scheme="http", port=port, timeout=60)
 
     def retrieve_paragraphs(
         self,

@@ -1,41 +1,51 @@
 # Combined configuration for AdaptiveRAG
-# This single file gathers all stage-specific configs under explicit keys.
-# Sections:
-#  - paths
-#  - hotpotqa
-#  - llm
-#  - retriever
-#  - pipeline
-#  - labels
-#  - model
-#  - train
-#  - evaluate
+# Updated for:
+# - data/corpus/
+# - data/datasets/
+# - Elasticsearch BM25 retriever
+# - six-dataset Adaptive-RAG setup
 
 # -------------------------
 # Shared paths
 # -------------------------
 paths:
-  hotpotqa_dir: &hotpotqa_dir data/hotpotqa
+  # -------------------------
+  # Root directories
+  # -------------------------
+  data_root: data
+  corpus_root: data/corpus
+  datasets_root: data/datasets
 
   # -------------------------
-  # Dataset
+  # Prepared full six-dataset files
   # -------------------------
-  train_data: &train_data data/hotpotqa/train.jsonl
-  validation_data: &validation_data data/hotpotqa/validation.jsonl
-  corpus: &corpus data/hotpotqa/corpus.jsonl
+  train_data: &train_data data/datasets/full_eval_500_each.jsonl
+  validation_data: &validation_data data/datasets/full_eval_500_each.jsonl
+  eval_data: *validation_data
+
+  # Optional per-dataset prepared directories
+  squad_dir: data/datasets/squad
+  natural_questions_dir: data/datasets/natural_questions
+  triviaqa_dir: data/datasets/triviaqa
+  hotpotqa_dir: data/datasets/hotpotqa
+  musique_dir: data/datasets/musique
+  twowiki_dir: data/datasets/twowikimultihopqa
 
   # -------------------------
-  # Index
+  # Corpora
   # -------------------------
-  index_dir: &index_dir data/index
+  wiki_corpus: data/corpus/wiki/psgs_w100.tsv
+  hotpotqa_corpus: data/corpus/hotpotqa
+  musique_corpus: data/corpus/musique
+  twowiki_corpus: data/corpus/2wikimultihopqa
 
   # -------------------------
   # Predictions
   # -------------------------
   predictions_train_base: &predictions_train_base data/predictions/train.jsonl
   predictions_validation_base: &predictions_validation_base data/predictions/validation.jsonl
+  predictions_eval_base: *predictions_validation_base
 
-  # Optional explicit paths (not required but useful for debugging)
   predictions_train_no_rag: data/predictions/train-no-rag.jsonl
   predictions_train_single: data/predictions/train-single.jsonl
   predictions_train_multi: data/predictions/train-multi.jsonl
@@ -50,20 +60,47 @@ paths:
   labeled_train: &labeled_train data/labeled/labeled_train.json
   labeled_validation: &labeled_validation data/labeled/labeled_validation.json
 
-  labeled_train_stats: &labeled_train_stats data/labeled/labeled_train.stats.json
-  labeled_validation_stats: &labeled_validation_stats data/labeled/labeled_validation.stats.json
+  labeled_train_stats: data/labeled/labeled_train.stats.json
+  labeled_validation_stats: data/labeled/labeled_validation.stats.json
 
   # -------------------------
-  # Classifier
+  # Router / classifier
   # -------------------------
   router_checkpoint: checkpoints/best.ckpt
+  router_predictions_validation: data/router/validation_router_predictions.jsonl
+  routed_predictions_validation: data/predictions/validation-routed.jsonl
+
+# -------------------------
+# Dataset preparation
+# -------------------------
+datasets:
+  sample_size_per_dataset: 500
+  seed: 42
+
+  names:
+    - squad
+    - natural_questions
+    - triviaqa
+    - hotpotqa
+    - musique
+    - twowikimultihopqa
+
+  single_hop:
+    - squad
+    - natural_questions
+    - triviaqa
+
+  multi_hop:
+    - hotpotqa
+    - musique
+    - twowikimultihopqa
 
 # -------------------------
 # HotpotQA preprocessing
 # -------------------------
 hotpotqa:
   config_name: distractor
-  build_corpus: true
+  build_corpus: false
 
 # -------------------------
 # LLM / generation defaults
@@ -72,87 +109,151 @@ llm:
   model_name: google/flan-t5-xl
   device: cuda
   dtype: float16
+
+  # Keep this modest. Retrieval is now per-query ES calls;
+  # LLM batching can still be high, but very high pipeline batches
+  # make debugging harder.
   batch_size: 16
+
   max_input_length: 2048
   max_new_tokens: 32
-  cot_max_new_tokens: 64
+  cot_max_new_tokens: 128
   query_max_new_tokens: 48
+
   num_beams: 1
   do_sample: false
   temperature: 1.0
 
 # -------------------------
-# Retriever
+# Elasticsearch BM25 retriever
 # -------------------------
 retriever:
-  encoder_name: BAAI/bge-base-en-v1.5
-  top_k_single: 2
-  top_k_multi: 4
-  final_k_multi: 4
-  # Index building parameters
-  nlist: null  # Number of index clusters (optional, auto if null)
-  nprobe: 8    # Number of clusters to probe during search
-  batch_size: 1024  # Batch size for embedding and indexing
-  smoke_test_k: 3   # Number of results to retrieve in smoke test
+  host: localhost
+  port: 9200
+
+  # Generation retrieval sizes
+  top_k_single: 6
+  top_k_multi: 6
+  final_k_multi: 6
+
+  # Elasticsearch behavior
+  default_index: wiki
+  query_title_field_too: true
+  max_buffer_count: 100
+  smoke_test_k: 5
+
+  # Must match the actual index names you created.
+  # Change values if your ES index names differ.
+  dataset_to_index:
+    squad: wiki
+    natural_questions: wiki
+    triviaqa: wiki
+
+    hotpotqa: hotpotqa
+    musique: musique
+    twowikimultihopqa: 2wikimultihopqa
+    2wiki: 2wikimultihopqa
 
 # -------------------------
 # Pipeline defaults
 # -------------------------
 pipeline:
   strategy: all
-  pipeline_batch_size: 128
+  pipeline_batch_size: 1
+  max_chars_per_doc: 900
+
   multi:
     steps: 2
-  # Data generation parameters
-  split: train  # Which dataset split to use: train or validation
-  limit: 10000   # Max records to process (null for all)
+
+  split: validation
+  limit: null
 
 # -------------------------
 # Label generation
 # -------------------------
 labels:
   batch_size: 64
+
+  # Correctness threshold used when assigning A/B/C from generated outputs.
   min_f1: 0.5
   margin: 0.01
   correct_threshold: 0.6
 
+  label_priority:
+    - no-rag
+    - single
+    - multi
+
+  fallback_labels:
+    single_hop: B
+    multi_hop: C
+
 # -------------------------
-# Model / classifier training
+# Router / classifier model
 # -------------------------
 model:
-  model_name: distilbert-base-uncased
+  # Paper uses T5-Large for query-complexity classification.
+  # Keep distilbert only if you intentionally want a lighter assignment version.
+  model_name: google-t5/t5-large
   num_classes: 3
   dropout: 0.2
-  learning_rate: 2e-5
-  weight_decay: 0.05
+  learning_rate: 3e-5
+  weight_decay: 0.01
   max_length: 256
+
+  label_map:
+    A: 0
+    B: 1
+    C: 2
+
+  id_to_label:
+    0: A
+    1: B
+    2: C
 
 # -------------------------
 # Training / experiment
 # -------------------------
 train:
-  batch_size: 32
+  batch_size: 16
   max_epochs: 10
   num_workers: 2
   val_split: 0.1
   seed: 42
+
   use_wandb: true
+  wandb_project: adaptive-rag
+  wandb_name: router
+
   strategy: auto
   devices: auto
   num_nodes: 1
   precision: "16-mixed"
   accelerator: auto
+
   checkpoints_dir: checkpoints
   early_stopping_patience: null
-  wandb_project: adaptive-rag
-  wandb_name: router
   log_every_n_steps: 25
   deterministic: false
-  rebuild_index: false
-  save_index: false
 
 # -------------------------
-# Evaluate stage
+# Evaluation
 # -------------------------
 evaluate:
-  prediction_path_key: predictions_multi
+  split: validation
+
+  prediction_paths:
+    no-rag: data/predictions/validation-no-rag.jsonl
+    single: data/predictions/validation-single.jsonl
+    multi: data/predictions/validation-multi.jsonl
+    routed: data/predictions/validation-routed.jsonl
+
+  prediction_path_key: routed
+
+  metrics:
+    - em
+    - f1
+    - accuracy
+    - avg_latency_s
+    - avg_retrieval_count
+    - avg_llm_calls

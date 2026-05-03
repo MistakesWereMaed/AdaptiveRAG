@@ -3,37 +3,36 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List, Optional
 
 from tqdm.auto import tqdm
 
-from src.index.utils import FaissIVFRetriever
 from src.file_loader import load_records, load_yaml_config
 from src.generate_responses.llm import LocalLLM
 from src.generate_responses.pipeline import AdaptiveRAGPipeline
 from src.generate_responses.streaming import MetricsAccumulator, StreamingJSONLWriter
+from src.index.seach_pipeline import BM25ElasticsearchPipelineRetriever
+from src.index.retriever import ElasticsearchRetriever
 
 
-VALID_SPLITS = {"train", "validation"}
+VALID_SPLITS = {"train", "validation", "eval", "test"}
 
 
 def _data_path(paths: dict, split: str) -> str:
-    key = f"{split}_data"
-    if key not in paths:
-        raise KeyError(f"Missing paths.{key} in config")
-    return paths[key]
+    candidate_keys = [f"{split}_data"]
+    if split == "eval":
+        candidate_keys.append("validation_data")
+    if split == "validation":
+        candidate_keys.append("eval_data")
+
+    for key in candidate_keys:
+        if key in paths:
+            return paths[key]
+
+    raise KeyError(f"Missing one of these path keys in config: {candidate_keys}")
 
 
 def _prediction_base(paths: dict, split: str) -> Path:
-    """Return split-specific prediction base path.
-
-    Preferred config keys:
-      - predictions_train_base
-      - predictions_validation_base
-
-    Fallback:
-      - predictions_base, with split appended to filename stem
-    """
     split_key = f"predictions_{split}_base"
     if split_key in paths:
         return Path(paths[split_key])
@@ -72,24 +71,54 @@ def _selected_strategies(strategy_cfg) -> List[str]:
     return [strategy_cfg]
 
 
+def _record_dataset(record: Any) -> Optional[str]:
+    if hasattr(record, "dataset"):
+        return getattr(record, "dataset")
+    if isinstance(record, dict):
+        return record.get("dataset")
+    return None
+
+
+def _record_id(record: Any) -> Any:
+    if hasattr(record, "id"):
+        return getattr(record, "id")
+    if isinstance(record, dict):
+        return record.get("id")
+    return None
+
+
+def _record_question(record: Any) -> str:
+    if hasattr(record, "question"):
+        return getattr(record, "question")
+    return record["question"]
+
+
+def _record_gold(record: Any) -> str:
+    if hasattr(record, "gold"):
+        return getattr(record, "gold")
+    return record.get("gold") or record.get("answer") or ""
+
+
 def _run_batch(
     pipeline: AdaptiveRAGPipeline,
     strategy: str,
     questions: List[str],
+    datasets: List[Optional[str]],
     single_k: int,
     multi_k: int,
     multi_steps: int,
     final_k_multi: int,
 ):
     if strategy == "no-rag":
-        return pipeline.no_retrieval(questions)
+        return pipeline.no_retrieval(questions, datasets=datasets)
 
     if strategy == "single":
-        return pipeline.single_step(questions, k=single_k)
+        return pipeline.single_step(questions, datasets=datasets, k=single_k)
 
     if strategy == "multi":
         return pipeline.multi_step(
             questions,
+            datasets=datasets,
             steps=multi_steps,
             k=multi_k,
             final_k=final_k_multi,
@@ -115,26 +144,30 @@ def run_strategy(
     with StreamingJSONLWriter(output_path) as writer:
         for start in tqdm(range(0, len(records), batch_size), desc=strategy, unit="batch"):
             batch = records[start : start + batch_size]
-            questions = [record.question for record in batch]
+            questions = [_record_question(record) for record in batch]
+            datasets = [_record_dataset(record) for record in batch]
 
             outputs = _run_batch(
                 pipeline,
                 strategy,
                 questions,
+                datasets=datasets,
                 single_k=single_k,
                 multi_k=multi_k,
                 multi_steps=multi_steps,
                 final_k_multi=final_k_multi,
             )
 
-            for record, output in zip(batch, outputs):
+            for record, dataset, output in zip(batch, datasets, outputs):
                 writer.write(
                     {
-                        "id": record.id,
-                        "question": record.question,
-                        "gold": record.gold,
+                        "id": _record_id(record),
+                        "dataset": dataset,
+                        "question": _record_question(record),
+                        "gold": _record_gold(record),
                         "prediction": output.prediction.strip(),
                         "context": output.context,
+                        "retrieved_docs": pipeline.serialize_docs(output.retrieved_docs),
                         "strategy": strategy,
                         "retrieval_count": output.retrieval_count,
                         "llm_calls": output.llm_calls,
@@ -158,6 +191,21 @@ def run_strategy(
     print(f"[generate_responses] {strategy}: wrote {writer.count} records to {output_path}", flush=True)
 
 
+def _build_retriever(retriever_cfg: dict) -> BM25ElasticsearchPipelineRetriever:
+    es = ElasticsearchRetriever(
+        host=str(retriever_cfg.get("host", "localhost")),
+        port=int(retriever_cfg.get("port", 9200)),
+    )
+
+    return BM25ElasticsearchPipelineRetriever(
+        es_retriever=es,
+        dataset_to_index=retriever_cfg.get("dataset_to_index"),
+        default_index=str(retriever_cfg.get("default_index", "wiki")),
+        query_title_field_too=bool(retriever_cfg.get("query_title_field_too", True)),
+        max_buffer_count=int(retriever_cfg.get("max_buffer_count", 100)),
+    )
+
+
 def run_generate_responses(
     config_path: str = "config.yaml",
     split: str = "train",
@@ -174,16 +222,13 @@ def run_generate_responses(
         records = records[: max(0, int(limit))]
 
     output_base = _prediction_base(paths, split)
-    index_dir = Path(paths["index_dir"])
-
-    if not (index_dir / "index.faiss").exists() or not (index_dir / "documents.json").exists():
-        raise FileNotFoundError(f"Missing FAISS index files in {index_dir}")
 
     single_k = int(retriever_cfg.get("top_k_single", 6))
     multi_k = int(retriever_cfg.get("top_k_multi", 6))
     final_k_multi = int(retriever_cfg.get("final_k_multi", multi_k))
     multi_steps = int((pipeline_cfg.get("multi", {}) or {}).get("steps", 2))
     batch_size = int(pipeline_cfg.get("pipeline_batch_size", 8))
+    max_chars_per_doc = int(pipeline_cfg.get("max_chars_per_doc", 900))
 
     strategy_cfg = strategy_override or pipeline_cfg.get("strategy", "all")
     strategies = _selected_strategies(strategy_cfg)
@@ -195,12 +240,8 @@ def run_generate_responses(
     )
 
     llm = LocalLLM(llm_cfg)
-    retriever = FaissIVFRetriever(
-        encoder_name=retriever_cfg["encoder_name"],
-        nprobe=int(retriever_cfg.get("nprobe", 8)),
-    ).load(index_dir)
-
-    pipeline = AdaptiveRAGPipeline(llm, retriever)
+    retriever = _build_retriever(retriever_cfg)
+    pipeline = AdaptiveRAGPipeline(llm, retriever, max_chars_per_doc=max_chars_per_doc)
 
     for strategy in strategies:
         run_strategy(

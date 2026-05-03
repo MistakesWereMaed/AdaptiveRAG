@@ -1,1 +1,1 @@
-python -m ../src/prepare_datasets/main
+python -m ../src.prepare_data.main
