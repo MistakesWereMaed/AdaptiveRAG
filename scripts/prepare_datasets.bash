@@ -1,1 +1,0 @@
-python -m ../src.prepare_data.main

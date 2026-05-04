@@ -1,1 +1,0 @@
-python -m ../src.generate_responses.main --config config.yaml --split validation --strategy all

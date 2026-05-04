@@ -1,46 +1,13 @@
-# Python
-__pycache__/
-*.py[cod]
-*.so
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.qdrant_db/
-.venv/
-venv/
-env/
-
-# Build and packaging
-build/
-dist/
-*.egg-info/
-
-# Notebook checkpoints
-.ipynb_checkpoints/
-
-# Local environment and secrets
-.env
-.env.*
-
-# Model and experiment artifacts
-data/
-wandb/
-*.pt
-*.pth
-*.ckpt
-*.bin
-*.safetensors
-*.json
-*.jsonl
-*.pkl
-elasticsearch*
-ircot
-
-# Retrieval and cache files
-cache.json
-*.faiss
-*.index
-
-# OS files
+*.pyc
 .DS_Store
-Thumbs.db
+raw_data/
+processed_data/
+predictions/
+instantiated_configs/
+official_evaluation/
+.retriever_address.json
+.llm_server_address.json
+.retriever_address.jsonnet
+.llm_server_address.jsonnet
+.history
+.temp
