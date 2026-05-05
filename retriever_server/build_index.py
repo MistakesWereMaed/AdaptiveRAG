@@ -18,6 +18,7 @@ import base58
 from bs4 import BeautifulSoup
 import os
 import random
+import csv
 
 
 def hash_object(o: Any) -> str:
@@ -212,6 +213,44 @@ def make_musique_documents(elasticsearch_index: str, metadata: Dict = None):
                     yield (document)
                     metadata["idx"] += 1
 
+def make_wiki_documents(elasticsearch_index: str, metadata: Dict = None):
+    raw_glob_filepath = os.path.join("raw_data", "wiki", 'psgs_w100.tsv')
+    metadata = metadata or {"idx": 1}
+    assert "idx" in metadata
+
+    with open(raw_glob_filepath) as input_file:
+        tr = csv.reader(input_file, delimiter='\t')
+        next(tr)
+        for line in tqdm(tr):
+            #import pdb; pdb.set_trace()
+            #dict_line['_id'] = line[0]
+            paragraph_text = line[1]
+            title = line[2]
+            url = ""
+            
+            id_ = hash_object(" ".join([title, paragraph_text]))[:32]
+            paragraph_index = 0
+            is_abstract = True
+
+            es_paragraph = {
+                    "id": id_,
+                    "title": title,
+                    "paragraph_index": paragraph_index,
+                    "paragraph_text": paragraph_text,
+                    "url": url,
+                    "is_abstract": is_abstract,
+                                }
+            document = {
+                    "_op_type": "create",
+                    "_index": elasticsearch_index,
+                    "_id": metadata["idx"],
+                    "_source": es_paragraph,
+                    }
+            yield (document)
+            metadata["idx"] += 1
+
+
+
 
 if __name__ == "__main__":
 
@@ -220,7 +259,7 @@ if __name__ == "__main__":
         "dataset_name",
         help="name of the dataset",
         type=str,
-        choices=("hotpotqa", "iirc", "2wikimultihopqa", "musique"),
+        choices=("hotpotqa", "iirc", "2wikimultihopqa", "musique", 'nq', 'wiki', 'trivia', 'squad'),
     )
     parser.add_argument(
         "--force",
@@ -236,8 +275,8 @@ if __name__ == "__main__":
     elasticsearch_index = args.dataset_name
     es = Elasticsearch(
         [{"host": elastic_host, "port": elastic_port}],
-        max_retries=2,  # it's exp backoff starting 2, more than 2 retries will be too much.
-        timeout=500,
+        max_retries=20,  # it's exp backoff starting 2, more than 2 retries will be too much.
+        timeout=2000,
         retry_on_timeout=True,
     )
 
@@ -286,6 +325,8 @@ if __name__ == "__main__":
         make_documents = make_2wikimultihopqa_documents
     elif args.dataset_name == "musique":
         make_documents = make_musique_documents
+    elif args.dataset_name == "wiki":
+        make_documents = make_wiki_documents 
     else:
         raise Exception(f"Unknown dataset_name {args.dataset_name}")
 

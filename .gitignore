@@ -11,3 +11,4 @@ official_evaluation/
 .llm_server_address.jsonnet
 .history
 .temp
+elasticsearch-7.10.2*
