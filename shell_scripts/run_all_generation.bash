@@ -159,14 +159,14 @@ run_dev() {
   python runner.py "$system" "$MODEL" "$dataset" write --prompt_set 1 --llm_port_num "$LLM_PORT_NUM"
 
   if [[ "${FORCE:-0}" == "1" ]]; then
-    python runner.py "$system" "$MODEL" "$dataset" predict   --prompt_set 1   --sample_size 500   --llm_port_num "$LLM_PORT_NUM"   --force
+    python runner.py "$system" "$MODEL" "$dataset" predict   --prompt_set 1   --sample_size 10   --llm_port_num "$LLM_PORT_NUM"   --force
   else
-    python runner.py "$system" "$MODEL" "$dataset" predict   --prompt_set 1   --sample_size 500   --llm_port_num "$LLM_PORT_NUM"
+    python runner.py "$system" "$MODEL" "$dataset" predict   --prompt_set 1   --sample_size 10   --llm_port_num "$LLM_PORT_NUM"
   fi
 
-  python runner.py "$system" "$MODEL" "$dataset" evaluate --prompt_set 1 --sample_size 500 --llm_port_num "$LLM_PORT_NUM"
+  python runner.py "$system" "$MODEL" "$dataset" evaluate --prompt_set 1 --sample_size 10 --llm_port_num "$LLM_PORT_NUM"
 
-  python runner.py "$system" "$MODEL" "$dataset" summarize --prompt_set 1 --sample_size 500 --llm_port_num "$LLM_PORT_NUM"
+  python runner.py "$system" "$MODEL" "$dataset" summarize --prompt_set 1 --sample_size 10 --llm_port_num "$LLM_PORT_NUM"
 }
 
 run_test() {

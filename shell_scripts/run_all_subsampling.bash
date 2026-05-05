@@ -10,7 +10,7 @@ set -euo pipefail
 # Main AdaptiveRAG classifier construction uses 500 samples per dataset.
 
 SUBSAMPLE_SCRIPT="processing_scripts.subsample_dataset_and_remap_paras"
-NUM_SAMPLES="${NUM_SAMPLES:-500}"
+NUM_SAMPLES="${NUM_SAMPLES:-10}"
 
 DATASETS=(
   "hotpotqa"
