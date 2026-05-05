@@ -5,6 +5,7 @@ import uuid
 import subprocess
 import argparse
 from typing import Dict, Any
+import string
 
 import _jsonnet
 from commaqa.inference.constants import PREDICTION_TYPES, READER_NAME_CLASS
@@ -22,7 +23,26 @@ from lib import (
 from metrics.drop_answer_em_f1 import DropAnswerEmAndF1
 from metrics.support_em_f1 import SupportEmF1Metric
 from metrics.answer_support_recall import AnswerSupportRecallMetric
+from metrics.squad_answer_em_f1 import SquadAnswerEmF1Metric
 
+def normalize_answer(s):
+    """Lower text and remove punctuation, articles and extra whitespace."""
+
+    def remove_articles(text):
+        regex = re.compile(r"\b(a|an|the)\b", re.UNICODE)
+        return re.sub(regex, " ", text)
+
+    def white_space_fix(text):
+        return " ".join(text.split())
+
+    def remove_punc(text):
+        exclude = set(string.punctuation)
+        return "".join(ch for ch in text if ch not in exclude)
+
+    def lower(text):
+        return text.lower()
+
+    return white_space_fix(remove_articles(remove_punc(lower(s)))) 
 
 def answer_extractor(potentially_cot: str) -> str:
     # In a few experiments I forgot the configuring the answer extractor part
@@ -49,9 +69,13 @@ def evaluate_by_dicts(
     prediction_type: str,
     id_to_ground_truths: Dict[str, Any],
     id_to_predictions: Dict[str, Any],
+    dataset: str,
 ) -> Dict:
     if prediction_type == "answer":
-        metrics = [DropAnswerEmAndF1(), SupportEmF1Metric(do_normalize_answer=True)]
+        if dataset in ['hotpotqa', '2wikimultihopqa', 'musique', 'iirc']:
+            metrics = [DropAnswerEmAndF1(), SupportEmF1Metric(do_normalize_answer=True)]
+        else:
+            metrics = [SquadAnswerEmF1Metric(), SupportEmF1Metric(do_normalize_answer=True)]
     elif prediction_type in ("titles", "pids", "real_pids"):
         metrics = [SupportEmF1Metric()]
     elif prediction_type in ("paras"):
@@ -85,6 +109,7 @@ def evaluate_by_dicts(
             metrics[0](predicted_paras, ground_truth)
 
     evaluation_results = metrics[0].get_metric()
+
     if prediction_type == "answer":
         evaluation_results_ = metrics[1].get_metric()
         evaluation_results["sp_em"] = evaluation_results_["title_em"]
@@ -101,7 +126,7 @@ def official_evaluate_by_dicts(
 
     if prediction_type != "answer":
         # official evaluation is not available for non answer prediction.
-        return evaluate_by_dicts(prediction_type, id_to_ground_truths, id_to_predictions)
+        return evaluate_by_dicts(prediction_type, id_to_ground_truths, id_to_predictions, dataset)
 
     question_ids = list(id_to_predictions.keys())
 
@@ -162,10 +187,10 @@ def official_evaluate_by_dicts(
         with open(temp_output_file_path, "r") as file:
             metrics_ = eval(file.read().strip())
             metrics = {
-                "f1": round(metrics_["f1"], 3),
-                "em": round(metrics_["em"], 3),
-                "precision": round(metrics_["prec"], 3),
-                "recall": round(metrics_["recall"], 3),
+                "f1": round(metrics_["f1"], 5),
+                "em": round(metrics_["em"], 5),
+                "precision": round(metrics_["prec"], 5),
+                "recall": round(metrics_["recall"], 5),
                 "count": len(id_to_predictions),
             }
 
@@ -179,7 +204,7 @@ def official_evaluate_by_dicts(
 
         # prepare ground_truth file:
         temp_ground_truth_file_path = os.path.join(".temp", uuid.uuid4().hex)
-        original_data = read_json(os.path.join("raw_data", "2wikimultihopqa", "dev.json"))
+        original_data = read_json(os.path.join("raw_data", "2wikimultihopqa", "dev.jsonl"))
         filtered_data = [datum for datum in original_data if datum["_id"] in question_ids]
         write_json(filtered_data, temp_ground_truth_file_path)
 
@@ -223,10 +248,10 @@ def official_evaluate_by_dicts(
         with open(temp_output_file_path, "r") as file:
             metrics_ = json.loads(file.read().strip())
             metrics = {
-                "f1": round(metrics_["f1"] / 100, 3),
-                "em": round(metrics_["em"] / 100, 3),
-                "precision": round(metrics_["prec"] / 100, 3),
-                "recall": round(metrics_["recall"] / 100, 3),
+                "f1": round(metrics_["f1"] / 100, 5),
+                "em": round(metrics_["em"] / 100, 5),
+                "precision": round(metrics_["prec"] / 100, 5),
+                "recall": round(metrics_["recall"] / 100, 5),
                 "count": len(id_to_predictions),
             }
 
@@ -301,15 +326,15 @@ def official_evaluate_by_dicts(
         return metrics
 
     if dataset == "iirc":
-        return evaluate_by_dicts("answer", id_to_ground_truths, id_to_predictions)
+        return evaluate_by_dicts("answer", id_to_ground_truths, id_to_predictions, dataset)
 
 
-def load_experiment_config(config_file_path: str):
+def load_experiment_config(config_file_path: str, args):
     env_variables = {}
     retriever_address = get_retriever_address()
     env_variables["RETRIEVER_HOST"] = str(retriever_address["host"])
     env_variables["RETRIEVER_PORT"] = str(retriever_address["port"])
-    llm_server_address = get_llm_server_address()
+    llm_server_address = get_llm_server_address(args.llm_port_num)
     env_variables["LLM_SERVER_HOST"] = str(llm_server_address["host"])
     env_variables["LLM_SERVER_PORT"] = str(llm_server_address["port"])
     config = json.loads(_jsonnet.evaluate_file(config_file_path, ext_vars=env_variables))
@@ -366,7 +391,7 @@ def load_ground_truths(
             raise Exception("Unknown prediction_type.")
 
     return id_to_ground_truths
-
+    
 
 def load_predictions(prediction_file_path: str) -> Dict:
     with open(prediction_file_path, "r") as file:
@@ -510,13 +535,18 @@ def main():
     parser.add_argument(
         "--official", action="store_true", default=False, help="use official eval scripts when available."
     )
-
+    parser.add_argument('--set_name', type=str, help="set_name", required=True)
+    # TODO
+    # llm_port_num
+    parser.add_argument(
+        '--llm_port_num', type=str, help="llm_port_num", required=True
+    )
     args = parser.parse_args()
 
     config_filepath = get_config_file_path_from_name_or_path(args.experiment_name_or_path)
     experiment_name = os.path.splitext(os.path.basename(config_filepath))[0]
 
-    prediction_directory = os.path.join("predictions", experiment_name + args.prediction_suffix)
+    prediction_directory = os.path.join("predictions", args.set_name, experiment_name + args.prediction_suffix)
     prediction_file_name = os.path.splitext(os.path.basename(args.evaluation_path))[0]
     prediction_file_name = infer_source_target_prefix(config_filepath, args.evaluation_path) + prediction_file_name
     prediction_file_path = os.path.join(prediction_directory, "prediction__" + prediction_file_name + ".json")
@@ -536,7 +566,7 @@ def main():
         exit()
 
     # get prediction_type
-    experiment_config = load_experiment_config(config_filepath)
+    experiment_config = load_experiment_config(config_filepath, args)
     prediction_type = experiment_config["prediction_type"]
 
     # prep ground_truths
@@ -577,10 +607,12 @@ def main():
             dataset=dataset,
         )
     else:
+        dataset = infer_dataset_from_file_path(args.evaluation_path)
         evaluation_results = evaluate_by_dicts(
             prediction_type=prediction_type,
             id_to_predictions=id_to_predictions,
             id_to_ground_truths=id_to_ground_truths,
+            dataset=dataset,
         )
     print(json.dumps(evaluation_results, indent=4))
 
@@ -604,6 +636,33 @@ def main():
     with open(ground_truth_in_dict_file_path, "w") as file:
         json.dump(id_to_ground_truths, file, indent=4)
 
+    # TODO
+    # Save the zero single multi classification results
+    id_to_zero_single_multi_classification = {}
+    dict_zero_single_multi = {
+        'ircot' : 'multi',
+        'oner' : 'single',
+        'nor' : 'zero'
+    }
+    lst_zero_single_multi = []
+    zero_single_multi = dict_zero_single_multi[experiment_name.split('_')[0]]
+    lst_zero_single_multi.append(zero_single_multi)
+    if 'bm25_retrieval_count' in experiment_name :
+        retrieval_count = [i for i in experiment_name.split('___') if 'bm25_retrieval_count' in i][0].split('__')[1]
+        lst_zero_single_multi.append(retrieval_count)
+    for qid in id_to_ground_truths.keys():
+        lst_gold_ans = id_to_ground_truths[qid]
+        pred = id_to_predictions[qid]
+        
+        for gold_ans in lst_gold_ans:
+            if normalize_answer(gold_ans) == normalize_answer(pred):
+                id_to_zero_single_multi_classification[qid] = lst_zero_single_multi
+
+    zero_single_multi_classification_path = os.path.join(
+        prediction_directory, "zero_single_multi_classification__" + prediction_file_name + ".json"
+    )    
+    with open(zero_single_multi_classification_path, "w") as file:
+        json.dump(id_to_zero_single_multi_classification, file, indent=4)
 
 if __name__ == "__main__":
     main()

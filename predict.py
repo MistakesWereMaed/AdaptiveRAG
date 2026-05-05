@@ -32,12 +32,17 @@ def main():
         default="",
     )
     parser.add_argument("--silent", action="store_true", help="silent")
+    parser.add_argument('--set_name', type=str, help="set_name", required=True)
+    # TODO
+    # llm_port_num
+    parser.add_argument(
+        '--llm_port_num', type=str, help="llm_port_num", required=True
+    )
     args = parser.parse_args()
 
     config_filepath = get_config_file_path_from_name_or_path(args.experiment_name_or_path)
     experiment_name = os.path.splitext(os.path.basename(config_filepath))[0]
-
-    prediction_directory = os.path.join("predictions", experiment_name + args.prediction_suffix)
+    prediction_directory = os.path.join("predictions", args.set_name, experiment_name + args.prediction_suffix)
 
     os.makedirs(prediction_directory, exist_ok=True)
 
@@ -56,7 +61,7 @@ def main():
     retriever_address = get_retriever_address()
     env_variables["RETRIEVER_HOST"] = str(retriever_address["host"])
     env_variables["RETRIEVER_PORT"] = str(retriever_address["port"])
-    llm_server_address = get_llm_server_address()
+    llm_server_address = get_llm_server_address(args.llm_port_num)
     env_variables["LLM_SERVER_HOST"] = str(llm_server_address["host"])
     env_variables["LLM_SERVER_PORT"] = str(llm_server_address["port"])
 
@@ -85,24 +90,22 @@ def main():
 
     # To be able to reproduce the same result:
     git_hash_filepath = os.path.join(prediction_directory, "git_hash__" + prediction_filename + ".txt")
-    with open(git_hash_filepath, "w") as file:
-        file.write(get_git_hash())
 
     # Again for reproducibility:
     backup_config_filepath = os.path.join(prediction_directory, "config__" + prediction_filename + ".jsonnet")
     shutil.copyfile(config_filepath, backup_config_filepath)
 
     if not args.skip_evaluation:
-
-        evaluate_command = " ".join(["python evaluate.py", str(config_filepath), str(args.evaluation_path)]).strip()
+        
+        evaluate_command = " ".join(["python evaluate.py", str(config_filepath), str(args.evaluation_path), '--set_name', args.set_name, '--llm_port_num', args.llm_port_num]).strip()
 
         print(f"Run evaluate_command: \n{evaluate_command}\n")
 
         if not args.dry_run:
             subprocess.call(evaluate_command, shell=True)
-
+        
         evaluate_command = " ".join(
-            ["python evaluate.py", str(config_filepath), str(args.evaluation_path), "--official"]
+            ["python evaluate.py", str(config_filepath), str(args.evaluation_path), "--official", '--set_name', args.set_name, '--llm_port_num', args.llm_port_num]
         ).strip()
 
         print(f"Run evaluate_command: \n{evaluate_command}\n")

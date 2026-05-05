@@ -29,5 +29,4 @@ black
 ruff
 
 pytorch-lightning
-wandb
 numpy<2

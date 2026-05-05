@@ -4,6 +4,7 @@ Instantiates a base config with various HP combinations.
 
 import re
 import os
+os.environ['TRANSFORMERS_CACHE'] = os.path.dirname(os.getcwd()) + '/cache'
 import copy
 import shutil
 import json
@@ -13,7 +14,7 @@ import itertools
 from typing import Dict, List
 import pandas as pd
 import _jsonnet
-import argparse
+import argparse 
 
 from lib import (
     get_retriever_address,
@@ -22,8 +23,561 @@ from lib import (
     get_config_file_path_from_name_or_path,
 )
 
+import logging
+import time
+
+from functools import wraps
+
+logging.basicConfig(format = '%(asctime)s - %(levelname)s - %(name)s -   %(message)s',
+                    datefmt = '%m/%d/%Y %H:%M:%S',
+                    level = logging.ERROR)
+logger = logging.getLogger(__name__)
+
+
+def timed(func):
+    """This decorator prints the execution time for the decorated function."""
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        start = time.time()
+        result = func(*args, **kwargs)
+        end = time.time()
+        logger.debug("{} ran in {}s".format(func.__name__, round(end - start, 2)))
+        return result
+
+    return wrapper
 
 dataset_to_prompt_set_to_qids = {
+"squad": {
+        "1": [
+            "5abb14bd5542992ccd8e7f07",
+            "5ac2ada5554299657fa2900d",
+            "5a758ea55542992db9473680",
+            "5ae0185b55429942ec259c1b",
+            "5a8ed9f355429917b4a5bddd",
+            "5abfb3435542990832d3a1c1",
+            "5ab92dba554299131ca422a2",
+            "5a835abe5542996488c2e426",
+            "5a89c14f5542993b751ca98a",
+            "5a90620755429933b8a20508",
+            "5a7bbc50554299042af8f7d0",
+            "5a8f44ab5542992414482a25",
+            "5add363c5542990dbb2f7dc8",
+            "5a7fc53555429969796c1b55",
+            "5a790e7855429970f5fffe3d",
+        ],
+        "2": [
+            "5a90620755429933b8a20508",
+            "5a88f9d55542995153361218",
+            "5a758ea55542992db9473680",
+            "5a89c14f5542993b751ca98a",
+            "5abfb3435542990832d3a1c1",
+            "5a7bbc50554299042af8f7d0",
+            "5a77acab5542992a6e59df76",
+            "5a7fc53555429969796c1b55",
+            "5a8f44ab5542992414482a25",
+            "5a835abe5542996488c2e426",
+            "5ac2ada5554299657fa2900d",
+            "5a8ed9f355429917b4a5bddd",
+            "5a754ab35542993748c89819",
+            "5add363c5542990dbb2f7dc8",
+            "5abb14bd5542992ccd8e7f07",
+        ],
+        "3": [
+            "5a89d58755429946c8d6e9d9",
+            "5a758ea55542992db9473680",
+            "5a7fc53555429969796c1b55",
+            "5a7bbc50554299042af8f7d0",
+            "5a77acab5542992a6e59df76",
+            "5a90620755429933b8a20508",
+            "5a89c14f5542993b751ca98a",
+            "5ab92dba554299131ca422a2",
+            "5a8f44ab5542992414482a25",
+            "5ae0185b55429942ec259c1b",
+            "5a835abe5542996488c2e426",
+            "5a754ab35542993748c89819",
+            "5ac2ada5554299657fa2900d",
+            "5a790e7855429970f5fffe3d",
+            "5adfad0c554299603e41835a",
+        ],
+    }, 
+"trivia": {
+        "1": [
+            "5abb14bd5542992ccd8e7f07",
+            "5ac2ada5554299657fa2900d",
+            "5a758ea55542992db9473680",
+            "5ae0185b55429942ec259c1b",
+            "5a8ed9f355429917b4a5bddd",
+            "5abfb3435542990832d3a1c1",
+            "5ab92dba554299131ca422a2",
+            "5a835abe5542996488c2e426",
+            "5a89c14f5542993b751ca98a",
+            "5a90620755429933b8a20508",
+            "5a7bbc50554299042af8f7d0",
+            "5a8f44ab5542992414482a25",
+            "5add363c5542990dbb2f7dc8",
+            "5a7fc53555429969796c1b55",
+            "5a790e7855429970f5fffe3d",
+        ],
+        "2": [
+            "5a90620755429933b8a20508",
+            "5a88f9d55542995153361218",
+            "5a758ea55542992db9473680",
+            "5a89c14f5542993b751ca98a",
+            "5abfb3435542990832d3a1c1",
+            "5a7bbc50554299042af8f7d0",
+            "5a77acab5542992a6e59df76",
+            "5a7fc53555429969796c1b55",
+            "5a8f44ab5542992414482a25",
+            "5a835abe5542996488c2e426",
+            "5ac2ada5554299657fa2900d",
+            "5a8ed9f355429917b4a5bddd",
+            "5a754ab35542993748c89819",
+            "5add363c5542990dbb2f7dc8",
+            "5abb14bd5542992ccd8e7f07",
+        ],
+        "3": [
+            "5a89d58755429946c8d6e9d9",
+            "5a758ea55542992db9473680",
+            "5a7fc53555429969796c1b55",
+            "5a7bbc50554299042af8f7d0",
+            "5a77acab5542992a6e59df76",
+            "5a90620755429933b8a20508",
+            "5a89c14f5542993b751ca98a",
+            "5ab92dba554299131ca422a2",
+            "5a8f44ab5542992414482a25",
+            "5ae0185b55429942ec259c1b",
+            "5a835abe5542996488c2e426",
+            "5a754ab35542993748c89819",
+            "5ac2ada5554299657fa2900d",
+            "5a790e7855429970f5fffe3d",
+            "5adfad0c554299603e41835a",
+        ],
+    }, 
+"sciq": {
+        "1": [
+            "5abb14bd5542992ccd8e7f07",
+            "5ac2ada5554299657fa2900d",
+            "5a758ea55542992db9473680",
+            "5ae0185b55429942ec259c1b",
+            "5a8ed9f355429917b4a5bddd",
+            "5abfb3435542990832d3a1c1",
+            "5ab92dba554299131ca422a2",
+            "5a835abe5542996488c2e426",
+            "5a89c14f5542993b751ca98a",
+            "5a90620755429933b8a20508",
+            "5a7bbc50554299042af8f7d0",
+            "5a8f44ab5542992414482a25",
+            "5add363c5542990dbb2f7dc8",
+            "5a7fc53555429969796c1b55",
+            "5a790e7855429970f5fffe3d",
+        ],
+        "2": [
+            "5a90620755429933b8a20508",
+            "5a88f9d55542995153361218",
+            "5a758ea55542992db9473680",
+            "5a89c14f5542993b751ca98a",
+            "5abfb3435542990832d3a1c1",
+            "5a7bbc50554299042af8f7d0",
+            "5a77acab5542992a6e59df76",
+            "5a7fc53555429969796c1b55",
+            "5a8f44ab5542992414482a25",
+            "5a835abe5542996488c2e426",
+            "5ac2ada5554299657fa2900d",
+            "5a8ed9f355429917b4a5bddd",
+            "5a754ab35542993748c89819",
+            "5add363c5542990dbb2f7dc8",
+            "5abb14bd5542992ccd8e7f07",
+        ],
+        "3": [
+            "5a89d58755429946c8d6e9d9",
+            "5a758ea55542992db9473680",
+            "5a7fc53555429969796c1b55",
+            "5a7bbc50554299042af8f7d0",
+            "5a77acab5542992a6e59df76",
+            "5a90620755429933b8a20508",
+            "5a89c14f5542993b751ca98a",
+            "5ab92dba554299131ca422a2",
+            "5a8f44ab5542992414482a25",
+            "5ae0185b55429942ec259c1b",
+            "5a835abe5542996488c2e426",
+            "5a754ab35542993748c89819",
+            "5ac2ada5554299657fa2900d",
+            "5a790e7855429970f5fffe3d",
+            "5adfad0c554299603e41835a",
+        ],
+    },   
+"tydiqa": {
+        "1": [
+            "5abb14bd5542992ccd8e7f07",
+            "5ac2ada5554299657fa2900d",
+            "5a758ea55542992db9473680",
+            "5ae0185b55429942ec259c1b",
+            "5a8ed9f355429917b4a5bddd",
+            "5abfb3435542990832d3a1c1",
+            "5ab92dba554299131ca422a2",
+            "5a835abe5542996488c2e426",
+            "5a89c14f5542993b751ca98a",
+            "5a90620755429933b8a20508",
+            "5a7bbc50554299042af8f7d0",
+            "5a8f44ab5542992414482a25",
+            "5add363c5542990dbb2f7dc8",
+            "5a7fc53555429969796c1b55",
+            "5a790e7855429970f5fffe3d",
+        ],
+        "2": [
+            "5a90620755429933b8a20508",
+            "5a88f9d55542995153361218",
+            "5a758ea55542992db9473680",
+            "5a89c14f5542993b751ca98a",
+            "5abfb3435542990832d3a1c1",
+            "5a7bbc50554299042af8f7d0",
+            "5a77acab5542992a6e59df76",
+            "5a7fc53555429969796c1b55",
+            "5a8f44ab5542992414482a25",
+            "5a835abe5542996488c2e426",
+            "5ac2ada5554299657fa2900d",
+            "5a8ed9f355429917b4a5bddd",
+            "5a754ab35542993748c89819",
+            "5add363c5542990dbb2f7dc8",
+            "5abb14bd5542992ccd8e7f07",
+        ],
+        "3": [
+            "5a89d58755429946c8d6e9d9",
+            "5a758ea55542992db9473680",
+            "5a7fc53555429969796c1b55",
+            "5a7bbc50554299042af8f7d0",
+            "5a77acab5542992a6e59df76",
+            "5a90620755429933b8a20508",
+            "5a89c14f5542993b751ca98a",
+            "5ab92dba554299131ca422a2",
+            "5a8f44ab5542992414482a25",
+            "5ae0185b55429942ec259c1b",
+            "5a835abe5542996488c2e426",
+            "5a754ab35542993748c89819",
+            "5ac2ada5554299657fa2900d",
+            "5a790e7855429970f5fffe3d",
+            "5adfad0c554299603e41835a",
+        ],
+    },  
+"cpgqa": {
+        "1": [
+            "5abb14bd5542992ccd8e7f07",
+            "5ac2ada5554299657fa2900d",
+            "5a758ea55542992db9473680",
+            "5ae0185b55429942ec259c1b",
+            "5a8ed9f355429917b4a5bddd",
+            "5abfb3435542990832d3a1c1",
+            "5ab92dba554299131ca422a2",
+            "5a835abe5542996488c2e426",
+            "5a89c14f5542993b751ca98a",
+            "5a90620755429933b8a20508",
+            "5a7bbc50554299042af8f7d0",
+            "5a8f44ab5542992414482a25",
+            "5add363c5542990dbb2f7dc8",
+            "5a7fc53555429969796c1b55",
+            "5a790e7855429970f5fffe3d",
+        ],
+        "2": [
+            "5a90620755429933b8a20508",
+            "5a88f9d55542995153361218",
+            "5a758ea55542992db9473680",
+            "5a89c14f5542993b751ca98a",
+            "5abfb3435542990832d3a1c1",
+            "5a7bbc50554299042af8f7d0",
+            "5a77acab5542992a6e59df76",
+            "5a7fc53555429969796c1b55",
+            "5a8f44ab5542992414482a25",
+            "5a835abe5542996488c2e426",
+            "5ac2ada5554299657fa2900d",
+            "5a8ed9f355429917b4a5bddd",
+            "5a754ab35542993748c89819",
+            "5add363c5542990dbb2f7dc8",
+            "5abb14bd5542992ccd8e7f07",
+        ],
+        "3": [
+            "5a89d58755429946c8d6e9d9",
+            "5a758ea55542992db9473680",
+            "5a7fc53555429969796c1b55",
+            "5a7bbc50554299042af8f7d0",
+            "5a77acab5542992a6e59df76",
+            "5a90620755429933b8a20508",
+            "5a89c14f5542993b751ca98a",
+            "5ab92dba554299131ca422a2",
+            "5a8f44ab5542992414482a25",
+            "5ae0185b55429942ec259c1b",
+            "5a835abe5542996488c2e426",
+            "5a754ab35542993748c89819",
+            "5ac2ada5554299657fa2900d",
+            "5a790e7855429970f5fffe3d",
+            "5adfad0c554299603e41835a",
+        ],
+    },  
+"sleepqa": {
+        "1": [
+            "5abb14bd5542992ccd8e7f07",
+            "5ac2ada5554299657fa2900d",
+            "5a758ea55542992db9473680",
+            "5ae0185b55429942ec259c1b",
+            "5a8ed9f355429917b4a5bddd",
+            "5abfb3435542990832d3a1c1",
+            "5ab92dba554299131ca422a2",
+            "5a835abe5542996488c2e426",
+            "5a89c14f5542993b751ca98a",
+            "5a90620755429933b8a20508",
+            "5a7bbc50554299042af8f7d0",
+            "5a8f44ab5542992414482a25",
+            "5add363c5542990dbb2f7dc8",
+            "5a7fc53555429969796c1b55",
+            "5a790e7855429970f5fffe3d",
+        ],
+        "2": [
+            "5a90620755429933b8a20508",
+            "5a88f9d55542995153361218",
+            "5a758ea55542992db9473680",
+            "5a89c14f5542993b751ca98a",
+            "5abfb3435542990832d3a1c1",
+            "5a7bbc50554299042af8f7d0",
+            "5a77acab5542992a6e59df76",
+            "5a7fc53555429969796c1b55",
+            "5a8f44ab5542992414482a25",
+            "5a835abe5542996488c2e426",
+            "5ac2ada5554299657fa2900d",
+            "5a8ed9f355429917b4a5bddd",
+            "5a754ab35542993748c89819",
+            "5add363c5542990dbb2f7dc8",
+            "5abb14bd5542992ccd8e7f07",
+        ],
+        "3": [
+            "5a89d58755429946c8d6e9d9",
+            "5a758ea55542992db9473680",
+            "5a7fc53555429969796c1b55",
+            "5a7bbc50554299042af8f7d0",
+            "5a77acab5542992a6e59df76",
+            "5a90620755429933b8a20508",
+            "5a89c14f5542993b751ca98a",
+            "5ab92dba554299131ca422a2",
+            "5a8f44ab5542992414482a25",
+            "5ae0185b55429942ec259c1b",
+            "5a835abe5542996488c2e426",
+            "5a754ab35542993748c89819",
+            "5ac2ada5554299657fa2900d",
+            "5a790e7855429970f5fffe3d",
+            "5adfad0c554299603e41835a",
+        ],
+    }, 
+"popqa": {
+        "1": [
+            "5abb14bd5542992ccd8e7f07",
+            "5ac2ada5554299657fa2900d",
+            "5a758ea55542992db9473680",
+            "5ae0185b55429942ec259c1b",
+            "5a8ed9f355429917b4a5bddd",
+            "5abfb3435542990832d3a1c1",
+            "5ab92dba554299131ca422a2",
+            "5a835abe5542996488c2e426",
+            "5a89c14f5542993b751ca98a",
+            "5a90620755429933b8a20508",
+            "5a7bbc50554299042af8f7d0",
+            "5a8f44ab5542992414482a25",
+            "5add363c5542990dbb2f7dc8",
+            "5a7fc53555429969796c1b55",
+            "5a790e7855429970f5fffe3d",
+        ],
+        "2": [
+            "5a90620755429933b8a20508",
+            "5a88f9d55542995153361218",
+            "5a758ea55542992db9473680",
+            "5a89c14f5542993b751ca98a",
+            "5abfb3435542990832d3a1c1",
+            "5a7bbc50554299042af8f7d0",
+            "5a77acab5542992a6e59df76",
+            "5a7fc53555429969796c1b55",
+            "5a8f44ab5542992414482a25",
+            "5a835abe5542996488c2e426",
+            "5ac2ada5554299657fa2900d",
+            "5a8ed9f355429917b4a5bddd",
+            "5a754ab35542993748c89819",
+            "5add363c5542990dbb2f7dc8",
+            "5abb14bd5542992ccd8e7f07",
+        ],
+        "3": [
+            "5a89d58755429946c8d6e9d9",
+            "5a758ea55542992db9473680",
+            "5a7fc53555429969796c1b55",
+            "5a7bbc50554299042af8f7d0",
+            "5a77acab5542992a6e59df76",
+            "5a90620755429933b8a20508",
+            "5a89c14f5542993b751ca98a",
+            "5ab92dba554299131ca422a2",
+            "5a8f44ab5542992414482a25",
+            "5ae0185b55429942ec259c1b",
+            "5a835abe5542996488c2e426",
+            "5a754ab35542993748c89819",
+            "5ac2ada5554299657fa2900d",
+            "5a790e7855429970f5fffe3d",
+            "5adfad0c554299603e41835a",
+        ],
+    },   
+"nq": {
+        "1": [
+            "5abb14bd5542992ccd8e7f07",
+            "5ac2ada5554299657fa2900d",
+            "5a758ea55542992db9473680",
+            "5ae0185b55429942ec259c1b",
+            "5a8ed9f355429917b4a5bddd",
+            "5abfb3435542990832d3a1c1",
+            "5ab92dba554299131ca422a2",
+            "5a835abe5542996488c2e426",
+            "5a89c14f5542993b751ca98a",
+            "5a90620755429933b8a20508",
+            "5a7bbc50554299042af8f7d0",
+            "5a8f44ab5542992414482a25",
+            "5add363c5542990dbb2f7dc8",
+            "5a7fc53555429969796c1b55",
+            "5a790e7855429970f5fffe3d",
+        ],
+        "2": [
+            "5a90620755429933b8a20508",
+            "5a88f9d55542995153361218",
+            "5a758ea55542992db9473680",
+            "5a89c14f5542993b751ca98a",
+            "5abfb3435542990832d3a1c1",
+            "5a7bbc50554299042af8f7d0",
+            "5a77acab5542992a6e59df76",
+            "5a7fc53555429969796c1b55",
+            "5a8f44ab5542992414482a25",
+            "5a835abe5542996488c2e426",
+            "5ac2ada5554299657fa2900d",
+            "5a8ed9f355429917b4a5bddd",
+            "5a754ab35542993748c89819",
+            "5add363c5542990dbb2f7dc8",
+            "5abb14bd5542992ccd8e7f07",
+        ],
+        "3": [
+            "5a89d58755429946c8d6e9d9",
+            "5a758ea55542992db9473680",
+            "5a7fc53555429969796c1b55",
+            "5a7bbc50554299042af8f7d0",
+            "5a77acab5542992a6e59df76",
+            "5a90620755429933b8a20508",
+            "5a89c14f5542993b751ca98a",
+            "5ab92dba554299131ca422a2",
+            "5a8f44ab5542992414482a25",
+            "5ae0185b55429942ec259c1b",
+            "5a835abe5542996488c2e426",
+            "5a754ab35542993748c89819",
+            "5ac2ada5554299657fa2900d",
+            "5a790e7855429970f5fffe3d",
+            "5adfad0c554299603e41835a",
+        ],
+    },    
+    "hotpotqa": {
+        "1": [
+            "5abb14bd5542992ccd8e7f07",
+            "5ac2ada5554299657fa2900d",
+            "5a758ea55542992db9473680",
+            "5ae0185b55429942ec259c1b",
+            "5a8ed9f355429917b4a5bddd",
+            "5abfb3435542990832d3a1c1",
+            "5ab92dba554299131ca422a2",
+            "5a835abe5542996488c2e426",
+            "5a89c14f5542993b751ca98a",
+            "5a90620755429933b8a20508",
+            "5a7bbc50554299042af8f7d0",
+            "5a8f44ab5542992414482a25",
+            "5add363c5542990dbb2f7dc8",
+            "5a7fc53555429969796c1b55",
+            "5a790e7855429970f5fffe3d",
+        ],
+        "2": [
+            "5a90620755429933b8a20508",
+            "5a88f9d55542995153361218",
+            "5a758ea55542992db9473680",
+            "5a89c14f5542993b751ca98a",
+            "5abfb3435542990832d3a1c1",
+            "5a7bbc50554299042af8f7d0",
+            "5a77acab5542992a6e59df76",
+            "5a7fc53555429969796c1b55",
+            "5a8f44ab5542992414482a25",
+            "5a835abe5542996488c2e426",
+            "5ac2ada5554299657fa2900d",
+            "5a8ed9f355429917b4a5bddd",
+            "5a754ab35542993748c89819",
+            "5add363c5542990dbb2f7dc8",
+            "5abb14bd5542992ccd8e7f07",
+        ],
+        "3": [
+            "5a89d58755429946c8d6e9d9",
+            "5a758ea55542992db9473680",
+            "5a7fc53555429969796c1b55",
+            "5a7bbc50554299042af8f7d0",
+            "5a77acab5542992a6e59df76",
+            "5a90620755429933b8a20508",
+            "5a89c14f5542993b751ca98a",
+            "5ab92dba554299131ca422a2",
+            "5a8f44ab5542992414482a25",
+            "5ae0185b55429942ec259c1b",
+            "5a835abe5542996488c2e426",
+            "5a754ab35542993748c89819",
+            "5ac2ada5554299657fa2900d",
+            "5a790e7855429970f5fffe3d",
+            "5adfad0c554299603e41835a",
+        ],
+    },
+"temp": {
+        "1": [
+            "5abb14bd5542992ccd8e7f07",
+            "5ac2ada5554299657fa2900d",
+            "5a758ea55542992db9473680",
+            "5ae0185b55429942ec259c1b",
+            "5a8ed9f355429917b4a5bddd",
+            "5abfb3435542990832d3a1c1",
+            "5ab92dba554299131ca422a2",
+            "5a835abe5542996488c2e426",
+            "5a89c14f5542993b751ca98a",
+            "5a90620755429933b8a20508",
+            "5a7bbc50554299042af8f7d0",
+            "5a8f44ab5542992414482a25",
+            "5add363c5542990dbb2f7dc8",
+            "5a7fc53555429969796c1b55",
+            "5a790e7855429970f5fffe3d",
+        ],
+        "2": [
+            "5a90620755429933b8a20508",
+            "5a88f9d55542995153361218",
+            "5a758ea55542992db9473680",
+            "5a89c14f5542993b751ca98a",
+            "5abfb3435542990832d3a1c1",
+            "5a7bbc50554299042af8f7d0",
+            "5a77acab5542992a6e59df76",
+            "5a7fc53555429969796c1b55",
+            "5a8f44ab5542992414482a25",
+            "5a835abe5542996488c2e426",
+            "5ac2ada5554299657fa2900d",
+            "5a8ed9f355429917b4a5bddd",
+            "5a754ab35542993748c89819",
+            "5add363c5542990dbb2f7dc8",
+            "5abb14bd5542992ccd8e7f07",
+        ],
+        "3": [
+            "5a89d58755429946c8d6e9d9",
+            "5a758ea55542992db9473680",
+            "5a7fc53555429969796c1b55",
+            "5a7bbc50554299042af8f7d0",
+            "5a77acab5542992a6e59df76",
+            "5a90620755429933b8a20508",
+            "5a89c14f5542993b751ca98a",
+            "5ab92dba554299131ca422a2",
+            "5a8f44ab5542992414482a25",
+            "5ae0185b55429942ec259c1b",
+            "5a835abe5542996488c2e426",
+            "5a754ab35542993748c89819",
+            "5ac2ada5554299657fa2900d",
+            "5a790e7855429970f5fffe3d",
+            "5adfad0c554299603e41835a",
+        ],
+    },    
     "hotpotqa": {
         "1": [
             "5abb14bd5542992ccd8e7f07",
@@ -240,18 +794,18 @@ dataset_to_prompt_set_to_qids = {
 
 instantiation_schemes = {
     "nor_qa": {},
-    "oner": {"bm25_retrieval_count": ["15"]},
+    "oner": {"bm25_retrieval_count": ["15"]}, # gpt: ['6'] flan: ["15"]
     "oner_qa": {
-        "bm25_retrieval_count": ["5", "7", "9", "11", "13", "15"],
-        "distractor_count": ['"1"', '"2"', '"3"'],
+        "bm25_retrieval_count": ["15"],
+        "distractor_count": ['"1"'],
     },
     "ircot": {
-        "bm25_retrieval_count": ["2", "4", "6", "8"],
+        "bm25_retrieval_count": ["4", "6", "8"],
         "distractor_count": ['"1"', '"2"', '"3"'],
     },
     "ircot_qa": {
-        "bm25_retrieval_count": ["2", "4", "6", "8"],
-        "distractor_count": ['"1"', '"2"', '"3"'],
+        "bm25_retrieval_count": ["6"], # gpt: ['3'] flan: ["6"]
+        "distractor_count": ['"1"'],
     },
 }
 
@@ -272,9 +826,10 @@ def verify_config(config_file_path: str) -> bool:
     retriever_address = get_retriever_address()
     env_variables["RETRIEVER_HOST"] = str(retriever_address["host"])
     env_variables["RETRIEVER_PORT"] = str(retriever_address["port"])
-    llm_server_address = get_llm_server_address()
+    llm_server_address = get_llm_server_address(args.llm_port_num)
     env_variables["LLM_SERVER_HOST"] = str(llm_server_address["host"])
     env_variables["LLM_SERVER_PORT"] = str(llm_server_address["port"])
+    
 
     config_json = json.loads(_jsonnet.evaluate_file(config_file_path, ext_vars=env_variables))
     flattened_config_df = pd.json_normalize(config_json, sep=".")
@@ -400,7 +955,7 @@ def is_experiment_complete(
         num_complete_items = sum([bool(value) for key, value in predictions.items()])
     return num_complete_items / len(predictions) > 0.9
 
-
+@timed
 def main():
 
     parser = argparse.ArgumentParser(description="Manager script for dealing with HP tuning.")
@@ -416,7 +971,14 @@ def main():
     base_parser.add_argument(
         "--prompt_set", type=str, help="prompt_set", choices={"1", "2", "3", "aggregate"}, required=True
     )
-
+    base_parser.add_argument(
+        '--set_name', type=str, help="set_name", required=True
+    )
+    # TODO
+    # llm_port_num
+    base_parser.add_argument(
+        '--llm_port_num', type=str, help="llm_port_num", required=True
+    )
     subparsers = parser.add_subparsers(title="Commands", metavar="", dest="command")
     write_subparser = subparsers.add_parser(
         "write", description="write files.", help="write files.", parents=[base_parser]
@@ -583,6 +1145,7 @@ def main():
     hyperparameter_metrics_data = []
 
     args_best_is_passed = hasattr(args, "best") and args.best
+    
 
     if args.prompt_set == "aggregate":
         assert args.command == "summarize" and args_best_is_passed
@@ -624,7 +1187,9 @@ def main():
             )
 
         experiment_name = os.path.splitext(os.path.split(local_file_path)[1])[0]
+
         prediction_directory = os.path.join("predictions", experiment_name)
+
 
         evaluation_path = args.evaluation_path if hasattr(args, "evaluation_path") else None
 
@@ -708,7 +1273,7 @@ def main():
             verify_config(local_file_path)
 
         elif args.command == "predict" and not args_best_is_passed:
-            run_command = f"python predict.py {local_file_path} {evaluation_path}"
+            run_command = f"python predict.py {local_file_path} {evaluation_path} --set_name {args.set_name} --llm_port_num {args.llm_port_num}"
 
             if args.silent:
                 run_command += " --silent"
@@ -800,7 +1365,7 @@ def main():
                     max_metric_value = metric_value_
 
         elif args.command == "evaluate" and not args_best_is_passed:
-            run_command = f"python evaluate.py {local_file_path} {evaluation_path}"
+            run_command = f"python evaluate.py {local_file_path} {evaluation_path} --set_name {args.set_name} --llm_port_num {args.llm_port_num}"
             if os.path.exists(metrics_file_path) and args.skip_if_exists:
                 print(f"Skipping as the metrics file already exists here: {metrics_file_path}.")
                 continue
@@ -1015,7 +1580,7 @@ def main():
 
         if args.command == "predict":
 
-            run_command = f"python predict.py {target_write_best_config_file_path} {evaluation_path}"
+            run_command = f"python predict.py {target_write_best_config_file_path} {evaluation_path} --llm_port_num {args.llm_port_num}"
 
             if args.silent:
                 run_command += " --silent"
@@ -1036,7 +1601,8 @@ def main():
 
         if args.command == "evaluate":
             if os.path.exists(prediction_file_path):
-                run_command = f"python evaluate.py {target_write_best_config_file_path} {evaluation_path}"
+                #import pdb; pdb.set_trace()
+                run_command = f"python evaluate.py {target_write_best_config_file_path} {evaluation_path} --set_name {args.set_name} --llm_port_num {args.llm_port_num}"
                 if os.path.exists(metrics_file_path) and args.skip_if_exists:
                     print(f"Skipping as the metrics file already exists here: {metrics_file_path}.")
                 else:

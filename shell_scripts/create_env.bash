@@ -4,6 +4,7 @@ set -e  # exit on error
 
 ENV_NAME="adaptive-rag"
 PYTHON_VERSION="3.10"
+export PYTHONNOUSERSITE=1
 
 echo "======================================"
 echo "Creating conda environment: $ENV_NAME"
@@ -35,6 +36,8 @@ if [ -f requirements.txt ]; then
 else
     echo "WARNING: requirements.txt not found, skipping."
 fi
+
+uv pip install https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
 
 echo "======================================"
 echo "Environment setup complete"

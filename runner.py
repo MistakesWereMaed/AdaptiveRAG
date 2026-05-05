@@ -6,9 +6,9 @@ import subprocess
 
 def main():
     parser = argparse.ArgumentParser(description="Wrapper around run.py to make experimentation easier.")
-    parser.add_argument("system", type=str, choices=("ircot", "ircot_qa", "nor_qa", "oner", "oner_qa"))
-    parser.add_argument("model", type=str, choices=("codex", "flan-t5-xxl", "flan-t5-xl", "flan-t5-large", "flan-t5-base", "none"))
-    all_datasets = ["hotpotqa", "2wikimultihopqa", "musique", "iirc"]
+    parser.add_argument("system", type=str, choices=("ircot", "ircot_qa", "oner", "oner_qa", "nor_qa"))
+    parser.add_argument("model", type=str, choices=("flan-t5-xxl", "flan-t5-xl", "none", 'gpt'))
+    all_datasets = ["hotpotqa", "2wikimultihopqa", "musique", 'nq', 'trivia', 'squad']
     all_datasets += ["_to_".join([dataset_a, dataset_b]) for dataset_a in all_datasets for dataset_b in all_datasets]
     parser.add_argument("dataset", type=str, choices=all_datasets)
     parser.add_argument(
@@ -30,6 +30,14 @@ def main():
             "delete_predictions",
         },
     )
+    # TODO
+    # llm_port_num
+    parser.add_argument(
+        "--llm_port_num",
+        type=str,
+        help="llm_port_num",
+        default="8010",
+    )
     parser.add_argument(
         "--prompt_set",
         type=str,
@@ -41,6 +49,7 @@ def main():
     parser.add_argument("--use_backup", action="store_true", default=False, help="pass --use_backup flag")
     parser.add_argument("--skip_evaluation_path", action="store_true", default=False, help="skip_evaluation_path")
     parser.add_argument("--eval_test", action="store_true", default=False, help="eval_test")
+    parser.add_argument("--sample_size", type=int, help="sample_size")
     parser.add_argument("--best", action="store_true", default=False, help="pass --best flag")
     parser.add_argument("--skip_if_exists", action="store_true", default=False, help="skip evaluation of it exists.")
     parser.add_argument(
@@ -62,8 +71,10 @@ def main():
         experiment_name = "_".join([args.system, args.dataset])
     instantiation_scheme = args.system
 
+
+    set_name = "test" if args.eval_test else 'dev_' + str(args.sample_size)
     run_command_array = [
-        f"python run.py {args.command} {experiment_name} --instantiation_scheme {instantiation_scheme} --prompt_set {args.prompt_set}",
+        f"python run.py {args.command} {experiment_name} --instantiation_scheme {instantiation_scheme} --prompt_set {args.prompt_set} --set_name {set_name} --llm_port_num {args.llm_port_num}",
     ]
 
     if args.command in ("write", "predict", "evaluate", "print", "summarize") and args.best:
@@ -76,7 +87,7 @@ def main():
         args.command in ("predict", "evaluate", "track", "summarize", "ground_truth_check")
         and not args.skip_evaluation_path
     ) or args.best:
-        set_name = "test" if args.eval_test else "dev"
+        set_name = "test" if args.eval_test else 'dev_' + str(args.sample_size)
         evaluation_path = os.path.join("processed_data", eval_dataset, f"{set_name}_subsampled.jsonl")
         run_command_array += [f"--evaluation_path {evaluation_path}"]
 

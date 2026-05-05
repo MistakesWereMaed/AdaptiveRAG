@@ -20,12 +20,15 @@ def get_retriever_address(suffix: str = ""):
     return retriever_address_config
 
 
-def get_llm_server_address():
+def get_llm_server_address(llm_port_num : str):
     llm_server_address_config_filepath = ".llm_server_address.jsonnet"
     if not os.path.exists(llm_server_address_config_filepath):
         raise Exception(f"LLM Server address filepath ({llm_server_address_config_filepath}) not available.")
     llm_server_address_config = json.loads(_jsonnet.evaluate_file(llm_server_address_config_filepath))
     llm_server_address_config = {key: str(value) for key, value in llm_server_address_config.items()}
+    # TODO
+    #import pdb; pdb.set_trace()
+    llm_server_address_config['port'] = llm_port_num
     return llm_server_address_config
 
 
@@ -44,12 +47,13 @@ def get_roscoe_server_address(suffix: str = ""):
 def infer_dataset_from_file_path(file_path: str) -> str:
     matching_datasets = []
     file_path = str(file_path)
-    for dataset in ["hotpotqa", "2wikimultihopqa", "musique", "iirc"]:
+    for dataset in ["hotpotqa", "2wikimultihopqa", "musique", "iirc", 'nq', 'trivia', 'squad', 'temp', 'sciq', 'cpgqa', 'tydiqa', 'sleepqa', 'popqa']:
         if dataset.lower() in file_path.lower():
             matching_datasets.append(dataset)
     if not matching_datasets:
         raise Exception(f"Dataset couldn't be inferred from {file_path}. No matches found.")
     if len(matching_datasets) > 1:
+        #import pdb; pdb.set_trace()
         raise Exception(f"Dataset couldn't be inferred from {file_path}. Multiple matches found.")
     return matching_datasets[0]
 
@@ -73,7 +77,12 @@ def get_config_file_path_from_name_or_path(experiment_name_or_path: str) -> str:
             for _result in matching_result
             if os.path.splitext(os.path.basename(_result))[0] == experiment_name_or_path
         ]
+        matching_result = [i for i in matching_result if 'backup' not in str(i)]
+        #import pdb; pdb.set_trace()
+        assert len(matching_result) == 1 
+        
         if len(matching_result) != 1:
+            #import pdb; pdb.set_trace()
             exit(f"Couldn't find one matching path with the given name ({experiment_name_or_path}).")
         config_filepath = matching_result[0]
     else:

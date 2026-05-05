@@ -1,10 +1,13 @@
 import os
+import nltk
+
 from typing import List, Dict
 
 from nltk import word_tokenize
 from nltk.corpus import stopwords
 from nltk.stem.porter import PorterStemmer
 
+nltk.download('stopwords')
 stemmer = PorterStemmer()
 
 stop_words_set = set(stopwords.words("english"))
