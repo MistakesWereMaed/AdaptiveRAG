@@ -16,25 +16,11 @@ DATASETS=(
   "hotpotqa"
   "2wikimultihopqa"
   "musique"
-)
-
-for dataset in "${DATASETS[@]}"; do
-
-  echo
-  echo "============================================================"
-  echo "Subsampling dataset=${dataset}, split=dev_diff_size, n=${NUM_SAMPLES}"
-  echo "============================================================"
-  python -m "$SUBSAMPLE_SCRIPT" "$dataset" "dev_diff_size" "$NUM_SAMPLES"
-
-done
-
-DATASETS=(
   "nq"
   "trivia"
   "squad"
 )
 
-# Missing split files are skipped safely.
 SPLITS=(
   "test"
   "dev_diff_size"

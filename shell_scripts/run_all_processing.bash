@@ -4,6 +4,9 @@ set -euo pipefail
 SCRIPT_DIR="processing_scripts"
 
 PROCESSORS=(
+  "process_hotpotqa"
+  "process_2wikimultihopqa"
+  "process_musique"
   "process_nq"
   "process_trivia"
   "process_squad"

@@ -2,7 +2,6 @@
 set -euo pipefail
 
 # Download data
-bash ./download/processed_data.sh
 bash ./download/raw_data.sh
 
 # Download Natural Question

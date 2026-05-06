@@ -11,3 +11,4 @@ instantiated_configs/
 .history
 .temp
 elasticsearch-7.10.2*
+classifier/data/*
