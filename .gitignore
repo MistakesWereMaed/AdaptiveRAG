@@ -12,3 +12,4 @@ instantiated_configs/
 .temp
 elasticsearch-7.10.2*
 classifier/data/*
+classifier/checkpoints/*

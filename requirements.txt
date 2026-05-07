@@ -30,3 +30,4 @@ ruff
 
 pytorch-lightning
 numpy<2
+wandb==0.15.12

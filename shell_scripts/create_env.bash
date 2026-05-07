@@ -28,7 +28,7 @@ echo "======================================"
 echo "Installing project requirements"
 echo "======================================"
 
-uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+uv pip install torch --index-url https://download.pytorch.org/whl/cu126
 
 # Install your requirements
 if [ -f requirements.txt ]; then
