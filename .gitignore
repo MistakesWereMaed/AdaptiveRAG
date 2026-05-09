@@ -13,3 +13,4 @@ instantiated_configs/
 elasticsearch-7.10.2*
 classifier/data/*
 classifier/checkpoints/*
+router/router_predictions/*

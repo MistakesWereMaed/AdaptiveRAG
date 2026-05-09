@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import torch
 from pathlib import Path
 
 import pytorch_lightning as pl
@@ -111,6 +112,15 @@ def main() -> None:
     trainer.fit(model, datamodule=dm)
     print(f"Best checkpoint: {checkpoint_cb.best_model_path}")
     print(f"Best val accuracy: {checkpoint_cb.best_model_score}")
+
+    torch.cuda.empty_cache()
+    if checkpoint_cb.best_model_path:
+        best_model = T5RouterModule.load_from_checkpoint(checkpoint_cb.best_model_path)
+        hf_dir = output_dir / "hf_best"
+        hf_dir.mkdir(parents=True, exist_ok=True)
+        best_model.model.save_pretrained(hf_dir)
+        best_model.tokenizer.save_pretrained(hf_dir)
+        print(f"Saved HF model to: {hf_dir}")
 
 if __name__ == "__main__":
     main()

@@ -204,7 +204,7 @@ def official_evaluate_by_dicts(
 
         # prepare ground_truth file:
         temp_ground_truth_file_path = os.path.join(".temp", uuid.uuid4().hex)
-        original_data = read_json(os.path.join("raw_data", "2wikimultihopqa", "dev.jsonl"))
+        original_data = read_json(os.path.join("raw_data", "2wikimultihopqa", "dev.json"))
         filtered_data = [datum for datum in original_data if datum["_id"] in question_ids]
         write_json(filtered_data, temp_ground_truth_file_path)
 
