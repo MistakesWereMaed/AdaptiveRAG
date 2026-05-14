@@ -1,180 +1,384 @@
-# Adaptive RAG
+# Adaptive-RAG Reproduction and Extension
 
-This repository is an implementation of the Adaptive-RAG paper by Jeong et al.
+Reproduction and extension of the paper:
 
-Adaptive RAG dynamically routes question answering requests between three strategies:
+> **Adaptive-RAG: Learning to Adapt Retrieval-Augmented Large Language Models through Question Complexity**
+> Soyeong Jeong, Jinheon Baek, Sukmin Cho, Sung Ju Hwang, Jong C. Park
+> KAIST, 2024
 
-1. No retrieval
-2. Single-step retrieval
-3. Multi-step retrieval
+This repository reproduces the Adaptive-RAG pipeline using the official IRCoT codebase as the foundation, while re-implementing the adaptive routing framework, preprocessing pipeline, classifier training, router inference, evaluation pipeline, and table reproduction scripts.
 
-The repository is organized around a simple end-to-end flow:
+In addition to reproducing the original paper, this project also evaluates an extension to the routing classifier by replacing the original generative T5-Large router with discriminative encoder-based classifiers such as DeBERTa-v3.
 
-- build dense FAISS retrieval index from a corpus
-- generate weak labels by comparing the three strategies against ground-truth answers
-- train a router classifier on the labeled questions
-- run the router at inference time to choose the best answering strategy
+---
 
-## Paper Summary
+# Repository Overview
 
-Adaptive-RAG is a retrieval-augmented QA framework designed for a realistic query mix: some questions are simple and can be answered without retrieval, some need one retrieval step, and others require multi-step retrieval and reasoning.
+The project contains:
 
-The paper’s core idea is to **adapt strategy by query complexity** instead of using one fixed retrieval policy for all inputs.
+* Full Adaptive-RAG preprocessing pipeline
+* Dataset conversion and subsampling
+* BM25 retrieval indexing
+* Retrieval-augmented generation
+* Automatic query-complexity labeling
+* Router classifier training
+* Adaptive routing evaluation
+* Paper table reproduction scripts
+* Encoder-based router improvements
 
-- Strategy A (No Retrieval): answer directly with the LLM for straightforward questions.
-- Strategy B (Single-Step Retrieval): retrieve once, then answer with retrieved context.
-- Strategy C (Multi-Step Retrieval): iteratively retrieve and reason for complex multi-hop questions.
+The implementation closely follows the official repository behavior and interfaces wherever possible.
 
-To choose among A/B/C, the paper trains a smaller classifier that predicts query complexity. Since explicit complexity labels do not exist, the paper constructs training labels automatically using:
+---
 
-- Model-outcome silver labels (which strategy actually succeeds on each query)
-- Inductive bias from dataset structure (single-hop vs multi-hop tendencies)
+# Project Structure
 
-Across open-domain QA benchmarks (single-hop and multi-hop), the paper reports that this adaptive policy improves the performance/efficiency trade-off compared to fixed simple or fixed complex retrieval strategies.
-
-## What This Repository Implements
-
-This codebase implements the Adaptive-RAG pipeline described in the refactor plan:
-
-1. Three QA strategies in one pipeline:
-  - no retrieval
-  - single-step retrieval
-  - multi-step retrieval
-2. Structured dense FAISS retrieval with sentence-transformer embeddings.
-3. Title-aware context formatting for retrieval-augmented prompting.
-4. Retrieval diagnostics that can be run without generation.
-5. Weak-label generation and router training on top of the strategy outputs.
-6. Streaming inference with per-query execution traces.
-
-In short, the repository operationalizes the adaptive routing concept end-to-end: build the index, evaluate retrieval, generate predictions, label strategies, train the router, then evaluate adaptively.
-
-## Layout
-
-- `src/` contains all stage-specific code and shared utilities:
-  - `src/common/` — Shared data and RAG utilities used by multiple (schemas, file I/O, HotpotQA loaders, LLM, retriever, pipeline)
-  - `src/<stage>/` — Per-stage entrypoints and workflow helpers (prepare_hotpotqa, build_index, generate_responses, generate_labels, train_router, evaluate)
-- `data/` is the default location for prepared datasets and generated artifacts
-
-All code is now consolidatedwithin `src/` for easier readability and maintenance. Each stage contains only the files and functions needed for that stage, with cross-stage imports from `src.common.*` when necessary.
-
-## Setup
-
-Create an environment and install dependencies:
-
-```bash
-pip install -r requirements.txt
+```text
+AdaptiveRAG/
+│
+├── classifier/
+├── data/
+├── predictions/
+├── processed_data/
+├── retriever_server/
+├── router/
+├── shell_scripts/
+├── scripts/
+├── results/
+└── README.md
 ```
 
-## Quick Run Order
+---
 
-Run the pipeline in this order:
+# Supported Datasets
 
-1. Prepare HotpotQA
-2. Build retrieval index
-3. Run RAG pipelines to generate strategy outputs
-4. Generate weak labels
-5. Train router classifier
-6. Evaluate predictions
+## Single-Hop QA
 
-## Data Format
+* SQuAD
+* Natural Questions
+* TriviaQA
 
-Most utilities expect JSON or JSONL records with at least these fields:
+## Multi-Hop QA
 
-```json
-{
-  "question": "...",
-  "answer": "..."
+* MuSiQue
+* HotpotQA
+* 2WikiMultiHopQA
+
+---
+
+# Supported Retrieval Strategies
+
+| Strategy   | Description                |
+| ---------- | -------------------------- |
+| `nor_qa`   | No retrieval               |
+| `oner_qa`  | Single-step retrieval      |
+| `ircot_qa` | Multi-step IRCoT retrieval |
+
+---
+
+# Router Models
+
+## Original Paper Router
+
+* T5-Small
+* T5-Base
+* T5-Large
+
+## Additional Improvement Routers
+
+* DeBERTa-v3-Large
+
+---
+
+# Hardware Requirements
+
+## Recommended
+
+* NVIDIA V100 / A100 / RTX 4090
+* 32GB+ GPU VRAM recommended
+* Linux environment
+* CUDA 11.8+
+
+## Minimum Practical Setup
+
+* 24GB VRAM GPU
+* 32GB RAM
+
+---
+
+# Estimated Runtime
+
+The full original pipeline is extremely expensive.
+
+## Recommended Path (Using Official Prediction Artifacts)
+
+This repository defaults to using downloaded official prediction artifacts where possible.
+
+| Stage                            | Estimated Time |
+| -------------------------------- | -------------- |
+| Environment setup                | 10–20 min      |
+| Dataset download + preprocessing | 20–40 min      |
+| Router training                  | 1–2 hours      |
+| Router evaluation                | 10–30 min      |
+| Table reproduction               | <5 min         |
+
+## Full End-to-End Regeneration (Optional)
+
+| Stage                  | Estimated Time |
+| ---------------------- | -------------- |
+| Elasticsearch indexing | 2-3 hours     |
+| Retrieval generation   | 12–48+ hours   |
+| Total full pipeline    | 1–3 days       |
+
+The retrieval generation stage is the primary bottleneck.
+
+---
+
+# Quickstart
+
+This is the recommended workflow.
+
+## Clone Repository
+
+```bash
+git clone <repo_url>
+cd AdaptiveRAG
+```
+
+---
+
+
+## Step 1 — Environment Setup
+
+```bash
+bash shell_scripts/create_env.bash
+```
+
+---
+
+## Step 2 — Download Datasets
+
+```bash
+bash shell_scripts/download_raw_data.bash
+```
+
+---
+
+## Step 3 — Download Official Prediction Data
+
+```bash
+bash shell_scripts/download_official_data.bash
+```
+
+---
+
+## Step 4 — Process Datasets
+
+```bash
+bash shell_scripts/run_all_processing.bash
+```
+
+---
+
+## Step 5 — Build Subsampled Splits
+
+```bash
+bash shell_scripts/run_all_subsampling.bash
+```
+
+---
+
+## Step 6 — Label Training Data
+
+```bash
+bash shell_scripts/label_data.bash
+```
+
+This generates:
+
+* Silver labels
+* Binary labels
+* Train/validation router datasets
+
+---
+
+## Step 7 — Train Router
+
+```bash
+bash shell_scripts/run_train_router.bash
+```
+
+---
+
+## Step 8 — Run Adaptive Router
+
+```bash
+bash shell_scripts/run_router.bash
+```
+
+This performs:
+
+* Query routing
+* Routed prediction assembly
+* Adaptive evaluation
+
+---
+
+## Step 9 — Reproduce Paper Tables
+
+```bash
+bash shell_scripts/reproduce_tables.bash
+```
+
+Generated outputs:
+
+```text
+results/
+├── table_1.md
+├── table_2.md
+├── table_3.md
+├── table_4.md
+├── table_5.md
+├── table_6.md
+└── results.md
+```
+
+---
+
+# Optional Full End-to-End Generation Pipeline
+
+The following stages are optional because the runtime is prohibitively expensive for practical reproduction.
+
+These are only necessary if regenerating all retrieval outputs from scratch.
+
+---
+
+## Optional Step 4 — Download Elasticsearch
+
+```bash
+bash shell_scripts/download_elasticsearch.bash
+```
+
+---
+
+## Optional Step 5 — Start Retrieval Servers
+
+```bash
+bash shell_scripts/start_servers.bash
+```
+
+This launches:
+
+* Elasticsearch
+* Retriever server
+* LLM server
+
+---
+
+## Optional Step 6 — Build All Indices
+
+```bash
+bash shell_scripts/build_all_indices.bash
+```
+
+---
+
+## Optional Step 7 — Generate All Retrieval Outputs
+
+```bash
+bash shell_scripts/run_all_generation.bash
+```
+
+This stage may take multiple days depending on hardware.
+
+---
+
+## Optional Step 8 — Stop Servers
+
+```bash
+bash shell_scripts/stop_servers.bash
+```
+
+---
+
+# Full Script Order
+
+The complete pipeline order is:
+
+```text
+1  create_env
+2  download_raw_data
+3  download_official_data
+4  download_elasticsearch
+5  run_all_processing
+6  run_all_subsampling
+7  start_servers
+8  build_all_indices
+9  run_all_generation
+10 label_data
+11 stop_servers
+12 run_train_router
+13 run_router
+14 reproduce_tables
+```
+
+---
+
+# Improvement Over Original Paper
+
+The original paper uses a generative T5-Large model as the query-complexity router.
+
+This repository additionally evaluates discriminative encoder-based routers such as:
+
+* DeBERTa-v3-Large
+
+## Hypothesis
+
+Query complexity routing is fundamentally a classification task rather than a text-generation task.
+
+Encoder-only architectures should therefore:
+
+* improve routing accuracy,
+* reduce inference overhead,
+* reduce training instability,
+* and improve overall Adaptive-RAG efficiency.
+
+The resulting router metrics and reproduced paper tables include these comparisons directly alongside the original T5-Large implementation.
+
+---
+
+# Reproduced Tables
+
+This repository reproduces:
+
+| Table   | Description                |
+| ------- | -------------------------- |
+| Table 1 | Average QA results         |
+| Table 2 | Per-dataset QA results     |
+| Table 3 | Query routing distribution |
+| Table 4 | Training-data ablations    |
+| Table 5 | Case studies               |
+| Table 6 | Classifier-size ablations  |
+
+Some original paper rows remain incomplete because only FLAN-T5-XL retrieval artifacts were generated locally.
+
+---
+
+# Notes
+
+* The repository prioritizes reproducibility over optimization.
+* All random seeds are fixed where possible.
+* The implementation follows the official IRCoT interfaces closely.
+* The retrieval generation stages are extremely computationally expensive and were therefore replaced with official artifacts for practical reproduction.
+
+---
+
+# Citation
+
+```bibtex
+@article{jeong2024adaptiverag,
+  title={Adaptive-RAG: Learning to Adapt Retrieval-Augmented Large Language Models through Question Complexity},
+  author={Jeong, Soyeong and Baek, Jinheon and Cho, Sukmin and Hwang, Sung Ju and Park, Jong C.},
+  journal={arXiv preprint arXiv:2403.14403},
+  year={2024}
 }
-```
-
-Generated prediction files are keyed by `id` and contain model outputs separately from the source question:
-
-```json
-{
-  "id": 1,
-  "prediction": "...",
-  "gold": "...",
-  "strategy": "single",
-  "retrieval_count": 1,
-  "llm_calls": 1,
-  "latency_s": 0.42
-}
-```
-
-## Streaming Inference
-
-Inference is streamed to JSONL so results are written incrementally instead of accumulating in memory. Each prediction record includes execution traces, retrieval count, LLM call count, latency, and the retrieved context used for the answer.
-
-Retrieval corpora can use `title`, `text`, `content`, `passage`, `document`, or `context` fields. Plain text files with one document per line are still supported by the indexing script.
-
-## Stage Entrypoints
-
-The repository now exposes per-stage entrypoints under `src/`. Each stage has a `main.py` that can be invoked with `python -m`.
-
-Common and their purposes:
-
-1. `src/prepare_hotpotqa/main.py`
-- Purpose: Downloads and preprocesses HotpotQA into local JSONL files.
-- Main outputs: `data/hotpotqa/train.jsonl`, `data/hotpotqa/validation.jsonl`, and optional `data/hotpotqa/corpus.jsonl`.
-
-2. `src/build_index/main.py`
-- Purpose: Builds the dense FAISS retrieval index and stores structured document metadata.
-- Main outputs: `data/index/index.faiss` and `data/index/documents.json`.
-
-3. `src/evaluate/main.py`
-- Purpose: Evaluates retrieval quality and other diagnostics (retrieval-only modes available).
-- Main outputs: retrieval metrics JSON plus per-example JSONL diagnostics.
-
-4. `src/generate_responses/main.py`
-- Purpose: Runs the QA pipeline with `no-rag`, `single`, or `multi` strategies.
-- Main outputs: streaming prediction JSONL and per-strategy stats files.
-
-5. `src/generate_labels/main.py`
-- Purpose: Creates weak supervision labels for router training by scoring the output of each strategy.
-
-6. `src/train_router/main.py`
-- Purpose: Trains the query-complexity router/classifier from config-controlled training settings.
-
-7. `src/evaluate/main.py`
-- Purpose: Computes answer metrics such as EM/F1 from predictions and reference answers.
-
-## Ordered Commands
-
-### 1) Prepare HotpotQA data
-
-```bash
-python -m src.prepare_hotpotqa.main
-```
-
-### 2) Build dense retrieval index (one-time, reusable)
-
-```bash
-python -m src.build_index.main
-```
-
-### 3) Run RAG pipelines to produce predictions
-
-```bash
-python -m src.generate_responses.main
-```
-
-### 4) Generate weak labels
-
-Label generation uses all three RAG strategies and scores each result against the ground truth answer.
-
-```bash
-python -m src.generate_labels.main
-```
-
-### 5) Train router classifier
-
-
-```bash
-python -m src.train_router.main
-```
-
-### 6) Evaluate Trained Router
-
-```bash
-python -m src.evaluate_router.main
 ```

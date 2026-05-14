@@ -2,7 +2,7 @@ jsonnet
 git+https://github.com/huggingface/transformers.git@8637316e5e94ba0a2493e5df7846f2f23f46eaef
 accelerate==0.15.0
 sentencepiece
-protobuf==3.19.0
+protobuf==3.20
 nltk
 scipy
 openai
